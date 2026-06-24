@@ -166,6 +166,14 @@ export interface Database {
         Args: Record<string, never>;
         Returns: boolean;
       };
+      admin_log_transaction: {
+        Args: { p_user_id: string; p_type: string; p_symbol: string; p_amount: number; p_status?: string };
+        Returns: Database['public']['Tables']['transactions']['Row'];
+      };
+      admin_delete_user: {
+        Args: { p_user_id: string };
+        Returns: undefined;
+      };
     };
     Enums: { [_ in never]: never };
     CompositeTypes: { [_ in never]: never };

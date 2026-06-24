@@ -5,12 +5,13 @@ import {
   LayoutDashboard, Users, ArrowLeftRight, Settings, Shield,
   Megaphone, TrendingUp, TrendingDown, Activity, AlertTriangle,
   Search, Filter, Ban, CheckCircle, XCircle, Eye, Download,
-  DollarSign, Globe, Sliders, LogOut, Bell, Lock, Pencil, X
+  DollarSign, Globe, Sliders, LogOut, Bell, Lock, Pencil, X,
+  UserPlus, Trash2, Receipt,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import {
   getAdminStats, getAdminUsers, getAdminTransactions, toggleUserSuspension,
-  updateKycStatus, adjustUserBalance,
+  updateKycStatus, adjustUserBalance, createUser, deleteUser, logManualTransaction,
   getAnnouncements, createAnnouncement, toggleAnnouncement, deleteAnnouncement,
   getPlatformSettings, updatePlatformSettings,
   type AdminStats, type AdminUser, type AdminTransaction, type Announcement, type PlatformSettings,
@@ -98,6 +99,18 @@ export function AdminPage() {
   const [savingId, setSavingId] = useState<string | null>(null);
   const [savingSettings, setSavingSettings] = useState(false);
 
+  const [createOpen, setCreateOpen] = useState(false);
+  const [newUserForm, setNewUserForm] = useState({ firstName: '', lastName: '', email: '', password: '', plan: 'starter' as 'starter' | 'pro' | 'institutional' });
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState('');
+
+  const [txUser, setTxUser] = useState<AdminUser | null>(null);
+  const [txForm, setTxForm] = useState({ type: 'receive' as 'send' | 'receive' | 'stake' | 'unstake' | 'earn', symbol: 'USDC', amount: '', status: 'completed' as 'completed' | 'pending' | 'failed' });
+  const [loggingTx, setLoggingTx] = useState(false);
+  const [txError, setTxError] = useState('');
+
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
   const isAdmin = Boolean(user?.isAdmin);
 
   useEffect(() => {
@@ -151,6 +164,63 @@ export function AdminPage() {
       await toggleUserSuspension(u.id, next);
     } catch {
       setUsers(prev => prev.map(x => (x.id === u.id ? { ...x, isSuspended: u.isSuspended } : x)));
+    }
+  }
+
+  function refreshUsers() {
+    getAdminUsers().then(r => { setUsers(r.users); setUsersTotal(r.total); });
+  }
+
+  async function handleCreateUser() {
+    const { firstName, lastName, email, password, plan } = newUserForm;
+    if (!firstName || !email || password.length < 8) {
+      setCreateError('First name, email, and an 8+ character password are required.');
+      return;
+    }
+    setCreateError('');
+    setCreating(true);
+    try {
+      await createUser({ firstName, lastName, email, password, plan });
+      setCreateOpen(false);
+      setNewUserForm({ firstName: '', lastName: '', email: '', password: '', plan: 'starter' });
+      refreshUsers();
+    } catch (err: unknown) {
+      setCreateError(err instanceof Error ? err.message : 'Failed to create user.');
+    } finally {
+      setCreating(false);
+    }
+  }
+
+  async function handleDeleteUser(u: AdminUser) {
+    if (!window.confirm(`Permanently delete ${u.firstName} ${u.lastName} (${u.email})? This deletes their wallets, transactions, stakes and cards too. This cannot be undone.`)) return;
+    setDeletingId(u.id);
+    try {
+      await deleteUser(u.id);
+      setUsers(prev => prev.filter(x => x.id !== u.id));
+      setUsersTotal(t => t - 1);
+    } catch (err: unknown) {
+      window.alert(err instanceof Error ? err.message : 'Failed to delete user.');
+    } finally {
+      setDeletingId(null);
+    }
+  }
+
+  async function handleLogTransaction() {
+    if (!txUser) return;
+    const amount = parseFloat(txForm.amount);
+    if (!amount || amount <= 0) { setTxError('Enter a valid amount.'); return; }
+    setTxError('');
+    setLoggingTx(true);
+    try {
+      await logManualTransaction(txUser.id, { type: txForm.type, symbol: txForm.symbol.toUpperCase(), amount, status: txForm.status });
+      setTxUser(null);
+      setTxForm({ type: 'receive', symbol: 'USDC', amount: '', status: 'completed' });
+      refreshUsers();
+      getAdminTransactions().then(setTransactions);
+    } catch (err: unknown) {
+      setTxError(err instanceof Error ? err.message : 'Failed to log transaction.');
+    } finally {
+      setLoggingTx(false);
     }
   }
 
@@ -421,20 +491,24 @@ export function AdminPage() {
                   style={{ background: '#0A1628', border: '1px solid rgba(0,212,255,0.08)', color: '#5A7A9C', fontSize: 12 }}>
                   <Download size={13} /> Export CSV
                 </button>
+                <button onClick={() => { setCreateOpen(true); setCreateError(''); }} className="flex items-center gap-1.5 px-3 py-2.5 rounded-xl"
+                  style={{ background: 'rgba(0,212,255,0.1)', border: '1px solid rgba(0,212,255,0.25)', color: '#00D4FF', fontSize: 12, fontWeight: 600 }}>
+                  <UserPlus size={13} /> Add User
+                </button>
               </div>
 
               <div className="rounded-2xl overflow-hidden" style={{ background: '#0A1628', border: '1px solid rgba(0,212,255,0.08)' }}>
                 <div className="grid px-5 py-3"
-                  style={{ gridTemplateColumns: '1fr 1fr 110px 90px 150px 70px',
+                  style={{ gridTemplateColumns: '1fr 1fr 110px 90px 150px 130px',
                     borderBottom: '1px solid rgba(0,212,255,0.06)', fontSize: 11, fontWeight: 700, color: '#5A7A9C', letterSpacing: 0.5, textTransform: 'uppercase' }}>
                   <span>Name</span><span>Email</span>
                   <span>KYC</span><span>Plan</span><span>Balance</span><span>Actions</span>
                 </div>
                 {filteredUsers.map((u, i) => (
                   <div key={u.id} className="grid items-center px-5 py-3 transition-colors"
-                    style={{ gridTemplateColumns: '1fr 1fr 110px 90px 150px 70px',
+                    style={{ gridTemplateColumns: '1fr 1fr 110px 90px 150px 130px',
                       borderBottom: i < filteredUsers.length - 1 ? '1px solid rgba(0,212,255,0.04)' : 'none',
-                      opacity: savingId === u.id ? 0.6 : 1 }}
+                      opacity: savingId === u.id || deletingId === u.id ? 0.6 : 1 }}
                     onMouseEnter={e => e.currentTarget.style.background = 'rgba(0,212,255,0.02)'}
                     onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
                   >
@@ -478,6 +552,11 @@ export function AdminPage() {
                         title="View details">
                         <Eye size={11} style={{ color: '#00D4FF' }} />
                       </button>
+                      <button onClick={() => { setTxUser(u); setTxError(''); }}
+                        className="w-6 h-6 rounded-lg flex items-center justify-center"
+                        style={{ background: 'rgba(168,85,247,0.1)' }} title="Log a manual transaction">
+                        <Receipt size={11} style={{ color: '#A855F7' }} />
+                      </button>
                       <button onClick={() => toggleSuspend(u)}
                         className="w-6 h-6 rounded-lg flex items-center justify-center"
                         style={{ background: u.isSuspended ? 'rgba(0,200,150,0.08)' : 'rgba(255,59,92,0.08)' }}
@@ -486,6 +565,11 @@ export function AdminPage() {
                           ? <CheckCircle size={11} style={{ color: '#00C896' }} />
                           : <Ban size={11} style={{ color: '#FF3B5C' }} />
                         }
+                      </button>
+                      <button onClick={() => handleDeleteUser(u)} disabled={deletingId === u.id}
+                        className="w-6 h-6 rounded-lg flex items-center justify-center"
+                        style={{ background: 'rgba(255,59,92,0.08)' }} title="Delete user">
+                        <Trash2 size={11} style={{ color: '#FF3B5C' }} />
                       </button>
                     </div>
                   </div>
@@ -800,6 +884,130 @@ export function AdminPage() {
                 style={{ background: '#F0B429', color: '#0A1628', fontSize: 13, fontWeight: 700 }}>
                 Save balance
               </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
+
+      {/* ── Create user modal ── */}
+      {createOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ background: 'rgba(3,8,16,0.7)', backdropFilter: 'blur(4px)' }}
+          onClick={() => setCreateOpen(false)}>
+          <motion.div initial={{ opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }}
+            onClick={e => e.stopPropagation()}
+            className="w-full max-w-sm rounded-2xl p-6 relative"
+            style={{ background: '#0A1628', border: '1px solid rgba(0,212,255,0.15)', boxShadow: '0 0 80px rgba(0,0,0,0.6)' }}>
+            <button onClick={() => setCreateOpen(false)}
+              className="absolute top-4 right-4 w-7 h-7 rounded-lg flex items-center justify-center"
+              style={{ background: 'rgba(0,212,255,0.06)' }}>
+              <X size={14} style={{ color: '#5A7A9C' }} />
+            </button>
+            <div className="flex items-center gap-2.5 mb-4">
+              <div className="w-9 h-9 rounded-xl flex items-center justify-center"
+                style={{ background: 'rgba(0,212,255,0.1)', border: '1px solid rgba(0,212,255,0.2)' }}>
+                <UserPlus size={16} style={{ color: '#00D4FF' }} />
+              </div>
+              <div style={{ fontSize: 15, fontWeight: 800, color: '#E8F0FE' }}>Add user</div>
+            </div>
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-2">
+                <input value={newUserForm.firstName} onChange={e => setNewUserForm({ ...newUserForm, firstName: e.target.value })}
+                  placeholder="First name" className="px-3 py-2.5 rounded-xl outline-none"
+                  style={{ background: '#0D1E35', border: '1px solid rgba(0,212,255,0.12)', color: '#E8F0FE', fontSize: 13 }} />
+                <input value={newUserForm.lastName} onChange={e => setNewUserForm({ ...newUserForm, lastName: e.target.value })}
+                  placeholder="Last name" className="px-3 py-2.5 rounded-xl outline-none"
+                  style={{ background: '#0D1E35', border: '1px solid rgba(0,212,255,0.12)', color: '#E8F0FE', fontSize: 13 }} />
+              </div>
+              <input value={newUserForm.email} onChange={e => setNewUserForm({ ...newUserForm, email: e.target.value })}
+                type="email" placeholder="Email" className="w-full px-3 py-2.5 rounded-xl outline-none"
+                style={{ background: '#0D1E35', border: '1px solid rgba(0,212,255,0.12)', color: '#E8F0FE', fontSize: 13 }} />
+              <input value={newUserForm.password} onChange={e => setNewUserForm({ ...newUserForm, password: e.target.value })}
+                type="text" placeholder="Temporary password (8+ chars)" className="w-full px-3 py-2.5 rounded-xl outline-none"
+                style={{ background: '#0D1E35', border: '1px solid rgba(0,212,255,0.12)', color: '#E8F0FE', fontSize: 13, fontFamily: 'var(--font-mono)' }} />
+              <select value={newUserForm.plan} onChange={e => setNewUserForm({ ...newUserForm, plan: e.target.value as typeof newUserForm.plan })}
+                className="w-full px-3 py-2.5 rounded-xl outline-none"
+                style={{ background: '#0D1E35', border: '1px solid rgba(0,212,255,0.12)', color: '#E8F0FE', fontSize: 13 }}>
+                <option value="starter">Starter</option>
+                <option value="pro">Pro</option>
+                <option value="institutional">Institutional</option>
+              </select>
+              {createError && <p style={{ fontSize: 12, color: '#FF3B5C' }}>{createError}</p>}
+              <p style={{ fontSize: 11, color: '#3A5A7C' }}>The user will be created and signed in immediately on their end if they use this password; share it with them out of band.</p>
+              <div className="flex gap-2.5 pt-1">
+                <button onClick={() => setCreateOpen(false)} className="flex-1 py-2.5 rounded-xl" style={{ background: 'rgba(0,212,255,0.06)', color: '#5A7A9C', fontSize: 13, fontWeight: 600 }}>
+                  Cancel
+                </button>
+                <button onClick={handleCreateUser} disabled={creating} className="flex-1 py-2.5 rounded-xl"
+                  style={{ background: 'linear-gradient(135deg, #00D4FF, #0066FF)', color: '#050B14', fontSize: 13, fontWeight: 700, opacity: creating ? 0.7 : 1 }}>
+                  {creating ? 'Creating…' : 'Create user'}
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        </div>
+      )}
+
+      {/* ── Log transaction modal ── */}
+      {txUser && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ background: 'rgba(3,8,16,0.7)', backdropFilter: 'blur(4px)' }}
+          onClick={() => setTxUser(null)}>
+          <motion.div initial={{ opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }}
+            onClick={e => e.stopPropagation()}
+            className="w-full max-w-sm rounded-2xl p-6 relative"
+            style={{ background: '#0A1628', border: '1px solid rgba(0,212,255,0.15)', boxShadow: '0 0 80px rgba(0,0,0,0.6)' }}>
+            <button onClick={() => setTxUser(null)}
+              className="absolute top-4 right-4 w-7 h-7 rounded-lg flex items-center justify-center"
+              style={{ background: 'rgba(0,212,255,0.06)' }}>
+              <X size={14} style={{ color: '#5A7A9C' }} />
+            </button>
+            <div className="flex items-center gap-2.5 mb-1">
+              <div className="w-9 h-9 rounded-xl flex items-center justify-center"
+                style={{ background: 'rgba(168,85,247,0.1)', border: '1px solid rgba(168,85,247,0.2)' }}>
+                <Receipt size={16} style={{ color: '#A855F7' }} />
+              </div>
+              <div>
+                <div style={{ fontSize: 15, fontWeight: 800, color: '#E8F0FE' }}>Log transaction</div>
+                <div style={{ fontSize: 12, color: '#5A7A9C' }}>{txUser.firstName} {txUser.lastName}</div>
+              </div>
+            </div>
+            <div className="space-y-3 mt-4">
+              <div className="grid grid-cols-2 gap-2">
+                <select value={txForm.type} onChange={e => setTxForm({ ...txForm, type: e.target.value as typeof txForm.type })}
+                  className="px-3 py-2.5 rounded-xl outline-none"
+                  style={{ background: '#0D1E35', border: '1px solid rgba(0,212,255,0.12)', color: '#E8F0FE', fontSize: 13 }}>
+                  <option value="receive">Receive (credit)</option>
+                  <option value="earn">Earn (credit)</option>
+                  <option value="unstake">Unstake (credit)</option>
+                  <option value="send">Send (debit)</option>
+                  <option value="stake">Stake (debit)</option>
+                </select>
+                <input value={txForm.symbol} onChange={e => setTxForm({ ...txForm, symbol: e.target.value })}
+                  placeholder="Asset (e.g. BTC)" className="px-3 py-2.5 rounded-xl outline-none uppercase"
+                  style={{ background: '#0D1E35', border: '1px solid rgba(0,212,255,0.12)', color: '#E8F0FE', fontSize: 13, fontFamily: 'var(--font-mono)' }} />
+              </div>
+              <input value={txForm.amount} onChange={e => setTxForm({ ...txForm, amount: e.target.value })}
+                type="number" placeholder="Amount (in asset units)" className="w-full px-3 py-2.5 rounded-xl outline-none"
+                style={{ background: '#0D1E35', border: '1px solid rgba(0,212,255,0.12)', color: '#E8F0FE', fontSize: 13, fontFamily: 'var(--font-mono)' }} />
+              <select value={txForm.status} onChange={e => setTxForm({ ...txForm, status: e.target.value as typeof txForm.status })}
+                className="w-full px-3 py-2.5 rounded-xl outline-none"
+                style={{ background: '#0D1E35', border: '1px solid rgba(0,212,255,0.12)', color: '#E8F0FE', fontSize: 13 }}>
+                <option value="completed">Completed</option>
+                <option value="pending">Pending</option>
+                <option value="failed">Failed</option>
+              </select>
+              <p style={{ fontSize: 11, color: '#3A5A7C' }}>Credits/debits the user's {txForm.symbol || 'asset'} wallet by this amount and records the entry on their Transactions page. Debits fail if the wallet balance is too low.</p>
+              {txError && <p style={{ fontSize: 12, color: '#FF3B5C' }}>{txError}</p>}
+              <div className="flex gap-2.5 pt-1">
+                <button onClick={() => setTxUser(null)} className="flex-1 py-2.5 rounded-xl" style={{ background: 'rgba(0,212,255,0.06)', color: '#5A7A9C', fontSize: 13, fontWeight: 600 }}>
+                  Cancel
+                </button>
+                <button onClick={handleLogTransaction} disabled={loggingTx} className="flex-1 py-2.5 rounded-xl"
+                  style={{ background: '#A855F7', color: '#fff', fontSize: 13, fontWeight: 700, opacity: loggingTx ? 0.7 : 1 }}>
+                  {loggingTx ? 'Logging…' : 'Log transaction'}
+                </button>
+              </div>
             </div>
           </motion.div>
         </div>

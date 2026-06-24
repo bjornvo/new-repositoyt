@@ -590,3 +590,79 @@ begin
   return c;
 end;
 $$;
+
+-- ── Admin-only RPCs ────────────────────────────────────────────────────────────
+
+-- Manually log a transaction for a user and keep the matching wallet balance in
+-- sync (e.g. recording an off-platform deposit/withdrawal, a support credit).
+-- 'swap' isn't accepted here — a manual swap needs an explicit asset pair,
+-- which doesn't fit this single-asset ledger entry.
+create or replace function public.admin_log_transaction(
+  p_user_id uuid, p_type text, p_symbol text, p_amount numeric, p_status text default 'completed'
+)
+returns public.transactions
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  price numeric;
+  usd_amount numeric;
+  w public.wallets;
+  tx public.transactions;
+begin
+  if not public.is_admin() then
+    raise exception 'Forbidden';
+  end if;
+  if p_amount is null or p_amount <= 0 then
+    raise exception 'Amount must be positive';
+  end if;
+  if p_type not in ('send', 'receive', 'stake', 'unstake', 'earn') then
+    raise exception 'Invalid transaction type';
+  end if;
+  if p_status not in ('completed', 'pending', 'failed') then
+    raise exception 'Invalid status';
+  end if;
+
+  select coalesce(price, 1) into price from public.market_prices where symbol = p_symbol;
+  usd_amount := p_amount * coalesce(price, 1);
+
+  w := public._get_or_create_wallet(p_user_id, p_symbol, p_symbol);
+
+  if p_type in ('receive', 'earn', 'unstake') then
+    update public.wallets set balance = balance + p_amount, usd_value = usd_value + usd_amount where id = w.id;
+  else
+    if w.balance < p_amount then
+      raise exception 'Insufficient balance for this debit';
+    end if;
+    update public.wallets set balance = balance - p_amount, usd_value = greatest(usd_value - usd_amount, 0) where id = w.id;
+  end if;
+
+  insert into public.transactions (user_id, type, asset, amount, usd_value, status, fee)
+  values (p_user_id, p_type, p_symbol, p_amount, usd_amount, p_status, 0)
+  returning * into tx;
+
+  return tx;
+end;
+$$;
+
+-- Hard-delete a user. Runs as the function owner (the role that ran this
+-- schema, normally `postgres`), which — unlike `anon`/`authenticated` — has
+-- the grants needed to delete from auth.users directly. Everything FK'd to
+-- profiles.id (wallets, transactions, stakes, cards) cascades with it.
+create or replace function public.admin_delete_user(p_user_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if not public.is_admin() then
+    raise exception 'Forbidden';
+  end if;
+  if p_user_id = auth.uid() then
+    raise exception 'Cannot delete your own account';
+  end if;
+  delete from auth.users where id = p_user_id;
+end;
+$$;

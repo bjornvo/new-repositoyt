@@ -1,4 +1,6 @@
-import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import { createClient } from '@supabase/supabase-js';
+import { supabase, isSupabaseConfigured, supabaseUrl, supabaseAnonKey } from '../lib/supabase';
+import type { Database } from '../lib/database.types';
 
 export interface AdminStats {
   totalUsers: number;
@@ -373,5 +375,75 @@ export async function deleteAnnouncement(id: string): Promise<void> {
     return;
   }
   const { error } = await supabase.from('announcements').delete().eq('id', id);
+  if (error) throw new Error(error.message);
+}
+
+// ── User management ───────────────────────────────────────────────────────────
+
+/**
+ * Creates a new user account. Goes through the standard signUp flow, but on a
+ * throwaway Supabase client (no persisted session) so the *admin's* own login
+ * session in this tab isn't replaced by the new user's session — there is no
+ * admin "create user" API available without a service-role key on a server,
+ * which this client-only app intentionally never holds.
+ */
+export async function createUser(params: {
+  email: string;
+  password: string;
+  firstName: string;
+  lastName: string;
+  plan: 'starter' | 'pro' | 'institutional';
+}): Promise<void> {
+  if (!isSupabaseConfigured || !supabase) {
+    MOCK_USERS.unshift({
+      id: `user-${Date.now()}`, email: params.email, firstName: params.firstName, lastName: params.lastName,
+      plan: params.plan, kycStatus: 'pending', createdAt: new Date().toISOString(), walletCount: 0, balanceUsd: 0, isSuspended: false,
+    });
+    return;
+  }
+
+  const throwawayClient = createClient<Database>(supabaseUrl, supabaseAnonKey, {
+    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+  });
+
+  const { data, error } = await throwawayClient.auth.signUp({
+    email: params.email,
+    password: params.password,
+    options: { data: { first_name: params.firstName, last_name: params.lastName } },
+  });
+  if (error) throw new Error(error.message);
+  if (!data.user) throw new Error('User creation failed');
+
+  // `on_auth_user_created` already inserted the profile row; this just sets the plan.
+  const { error: profileError } = await supabase.from('profiles').update({ plan: params.plan }).eq('id', data.user.id);
+  if (profileError) throw new Error(profileError.message);
+}
+
+export async function deleteUser(userId: string): Promise<void> {
+  if (!isSupabaseConfigured || !supabase) {
+    const idx = MOCK_USERS.findIndex(u => u.id === userId);
+    if (idx >= 0) MOCK_USERS.splice(idx, 1);
+    return;
+  }
+  const { error } = await supabase.rpc('admin_delete_user', { p_user_id: userId });
+  if (error) throw new Error(error.message);
+}
+
+/** Manually logs a transaction for a user and keeps their matching wallet balance in sync. */
+export async function logManualTransaction(
+  userId: string,
+  params: { type: 'send' | 'receive' | 'stake' | 'unstake' | 'earn'; symbol: string; amount: number; status?: 'completed' | 'pending' | 'failed' },
+): Promise<void> {
+  if (!isSupabaseConfigured || !supabase) {
+    await delay(300);
+    return;
+  }
+  const { error } = await supabase.rpc('admin_log_transaction', {
+    p_user_id: userId,
+    p_type: params.type,
+    p_symbol: params.symbol,
+    p_amount: params.amount,
+    p_status: params.status ?? 'completed',
+  });
   if (error) throw new Error(error.message);
 }
