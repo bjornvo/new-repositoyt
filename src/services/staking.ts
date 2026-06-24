@@ -49,6 +49,7 @@ export async function getStakes(userId: string): Promise<Stake[]> {
   }));
 }
 
+/** Opens a stake, debiting the matching wallet for `amount` atomically server-side. */
 export async function stakeAsset(userId: string, poolId: string, amount: number): Promise<Stake> {
   const pool = STAKING_POOLS.find(p => p.id === poolId);
   if (!pool) throw new Error('Pool not found');
@@ -66,17 +67,25 @@ export async function stakeAsset(userId: string, poolId: string, amount: number)
     return stake;
   }
 
-  const unlockAt = pool.lockPeriodDays > 0
-    ? new Date(Date.now() + pool.lockPeriodDays * 86400000).toISOString()
-    : null;
-
-  const { data, error } = await supabase.from('stakes').insert({
-    user_id: userId, asset: pool.asset, amount, apy: pool.apy, earned: 0,
-    status: 'active', lock_period_days: pool.lockPeriodDays,
-    started_at: new Date().toISOString(), unlock_at: unlockAt,
-  }).select().single();
+  const { data, error } = await supabase.rpc('create_stake', {
+    p_symbol: pool.asset,
+    p_amount: amount,
+    p_apy: pool.apy,
+    p_lock_period_days: pool.lockPeriodDays,
+  });
   if (error) throw new Error(error.message);
 
   return { id: data.id, asset: data.asset, amount: data.amount, apy: data.apy, earned: data.earned,
     status: data.status, lockPeriodDays: data.lock_period_days, startedAt: data.started_at, unlockAt: data.unlock_at };
+}
+
+/** Closes a stake and credits principal + accrued rewards back to the wallet. */
+export async function unstakeAsset(stakeId: string): Promise<void> {
+  if (!isSupabaseConfigured || !supabase) {
+    const stake = MOCK_STAKES.find(s => s.id === stakeId);
+    if (stake) stake.status = 'unstaked';
+    return;
+  }
+  const { error } = await supabase.rpc('unstake_position', { p_stake_id: stakeId });
+  if (error) throw new Error(error.message);
 }

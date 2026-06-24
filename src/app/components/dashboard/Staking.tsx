@@ -3,23 +3,8 @@ import { Layers, TrendingUp, Gift } from 'lucide-react';
 import { useLang } from '../../i18n/LangContext';
 import { BarChart, Bar, ResponsiveContainer, Tooltip, XAxis } from 'recharts';
 import { useAuth } from '../../context/AuthContext';
-import { getStakes, stakeAsset, STAKING_POOLS, type Stake } from '../../../services/staking';
-
-const POOLS = [
-  { coin: 'ETH', name: 'Ethereum 2.0', color: '#627EEA', staked: '2.000', usd: '$7,042', rewards: '0.0821 ETH', rewardUsd: '$289', apy: 4.8, lockup: 'Flexible', icon: 'E' },
-  { coin: 'SOL', name: 'Solana', color: '#9945FF', staked: '20.00', usd: '$3,648', rewards: '1.420 SOL', rewardUsd: '$259', apy: 7.2, lockup: 'Flexible', icon: 'S' },
-  { coin: 'BNB', name: 'BNB Chain', color: '#F0B90B', staked: '5.000', usd: '$3,062', rewards: '0.210 BNB', rewardUsd: '$129', apy: 4.1, lockup: 'Flexible', icon: 'B' },
-  { coin: 'USDT', name: 'Tether Yield', color: '#26A17B', staked: '3000.00', usd: '$3,000', rewards: '142.50 USDT', rewardUsd: '$143', apy: 8.5, lockup: '30 days', icon: 'U' },
-];
-
-const AVAILABLE_POOLS = [
-  { coin: 'BTC', name: 'Bitcoin Lending', apy: 3.2, minStake: '0.01 BTC', color: '#F7931A', lockup: 'Flexible' },
-  { coin: 'USDC', name: 'USDC Savings', apy: 9.1, minStake: '100 USDC', color: '#2775CA', lockup: '7 days' },
-  { coin: 'ETH', name: 'Liquid Staking', apy: 5.4, minStake: '0.1 ETH', color: '#627EEA', lockup: 'Flexible' },
-  { coin: 'AVAX', name: 'Avalanche', apy: 11.2, minStake: '1 AVAX', color: '#E84142', lockup: '14 days' },
-  { coin: 'DOT', name: 'Polkadot', apy: 14.8, minStake: '10 DOT', color: '#E6007A', lockup: '28 days' },
-  { coin: 'MATIC', name: 'Polygon', apy: 6.7, minStake: '1 MATIC', color: '#8247E5', lockup: 'Flexible' },
-];
+import { getStakes, stakeAsset, unstakeAsset, STAKING_POOLS, type Stake } from '../../../services/staking';
+import { getMarketPrices, type MarketPrice } from '../../../services/market';
 
 const rewardsChart = [
   { month: 'Jan', earn: 120 }, { month: 'Feb', earn: 145 }, { month: 'Mar', earn: 189 },
@@ -33,32 +18,67 @@ export function Staking() {
   const [stakeOpen, setStakeOpen] = useState<string | null>(null);
   const [stakeAmount, setStakeAmount] = useState('');
   const [stakes, setStakes] = useState<Stake[]>([]);
+  const [prices, setPrices] = useState<MarketPrice[]>([]);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    getStakes(user?.id ?? 'guest').then(setStakes);
-  }, [user?.id]);
+  const refresh = () => {
+    Promise.all([getStakes(user?.id ?? 'guest'), getMarketPrices()]).then(([s, p]) => {
+      setStakes(s);
+      setPrices(p);
+      setLoading(false);
+    });
+  };
+
+  useEffect(refresh, [user?.id]);
+
+  const priceFor = (symbol: string) => prices.find(p => p.symbol === symbol)?.price ?? 1;
 
   const handleStake = async (poolId: string) => {
     const amount = parseFloat(stakeAmount);
-    if (!amount || amount <= 0) return;
-    await stakeAsset(user?.id ?? 'guest', poolId, amount);
-    const updated = await getStakes(user?.id ?? 'guest');
-    setStakes(updated);
-    setStakeOpen(null);
-    setStakeAmount('');
+    if (!amount || amount <= 0) { setError('Enter a valid amount.'); return; }
+    setError('');
+    setBusyId(poolId);
+    try {
+      await stakeAsset(user?.id ?? 'guest', poolId, amount);
+      setStakeOpen(null);
+      setStakeAmount('');
+      refresh();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Staking failed.');
+    } finally {
+      setBusyId(null);
+    }
   };
 
-  const totalStaked = stakes.reduce((s, st) => s + st.amount * 100, 0) || 16752;
-  const totalEarned = stakes.reduce((s, st) => s + st.earned * 100, 0) || 820;
+  const handleUnstake = async (stakeId: string) => {
+    setBusyId(stakeId);
+    try {
+      await unstakeAsset(stakeId);
+      refresh();
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const activeStakes = stakes.filter(s => s.status !== 'unstaked');
+  const totalStaked = activeStakes.reduce((s, st) => s + st.amount * priceFor(st.asset), 0);
+  const totalEarned = activeStakes.reduce((s, st) => s + st.earned * priceFor(st.asset), 0);
+  const avgApy = activeStakes.length ? activeStakes.reduce((s, st) => s + st.apy, 0) / activeStakes.length : 0;
+
+  if (loading) {
+    return <div style={{ color: '#5A7A9C', fontSize: 13 }}>Loading stakes…</div>;
+  }
 
   return (
     <div className="space-y-5">
       {/* Summary cards */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         {[
-          { label: d.staked, value: `$${totalStaked.toLocaleString()}`, icon: Layers, color: '#A855F7' },
-          { label: d.earned, value: `$${totalEarned.toLocaleString()}`, icon: Gift, color: '#00C896' },
-          { label: 'Avg ' + d.apy, value: '6.1%', icon: TrendingUp, color: '#F0B429' },
+          { label: d.staked, value: `$${totalStaked.toLocaleString('en', { maximumFractionDigits: 0 })}`, icon: Layers, color: '#A855F7' },
+          { label: d.earned, value: `$${totalEarned.toLocaleString('en', { maximumFractionDigits: 2 })}`, icon: Gift, color: '#00C896' },
+          { label: 'Avg ' + d.apy, value: `${avgApy.toFixed(1)}%`, icon: TrendingUp, color: '#F0B429' },
         ].map((card, i) => (
           <div key={i} className="p-4 rounded-2xl flex items-center gap-4" style={{ background: '#0A1628', border: '1px solid rgba(0,212,255,0.1)' }}>
             <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: card.color + '15' }}>
@@ -76,50 +96,58 @@ export function Staking() {
       <div className="rounded-2xl overflow-hidden" style={{ background: '#0A1628', border: '1px solid rgba(0,212,255,0.1)' }}>
         <div className="flex items-center justify-between px-5 py-4" style={{ borderBottom: '1px solid rgba(0,212,255,0.06)' }}>
           <div style={{ fontSize: 14, fontWeight: 600, color: '#E8F0FE' }}>Active Stakes</div>
-          <button
-            className="px-3 py-1.5 rounded-lg"
-            style={{ background: 'rgba(0,200,150,0.1)', color: '#00C896', fontSize: 12, fontWeight: 600, border: '1px solid rgba(0,200,150,0.2)' }}
-          >
-            {d.claimAll} — $820.00
-          </button>
+          <div style={{ fontSize: 12, color: '#00C896', fontWeight: 600 }}>
+            {d.earned}: ${totalEarned.toLocaleString('en', { maximumFractionDigits: 2 })}
+          </div>
         </div>
-        {POOLS.map((pool, i) => (
-          <div key={pool.coin} style={{ borderBottom: i < POOLS.length - 1 ? '1px solid rgba(0,212,255,0.04)' : 'none' }}>
-            <div className="flex flex-wrap items-center gap-4 px-5 py-4">
-              <div className="flex items-center gap-3 flex-1 min-w-0">
-                <div className="w-9 h-9 rounded-full flex items-center justify-center" style={{ background: pool.color + '22' }}>
-                  <span style={{ fontSize: 12, fontWeight: 800, color: pool.color }}>{pool.icon}</span>
+        {activeStakes.length === 0 && (
+          <div className="px-5 py-6 text-center" style={{ color: '#5A7A9C', fontSize: 13 }}>No active stakes yet — open one from the pools below.</div>
+        )}
+        {activeStakes.map((stake, i) => {
+          const pool = STAKING_POOLS.find(p => p.asset === stake.asset);
+          const usd = stake.amount * priceFor(stake.asset);
+          return (
+            <div key={stake.id} style={{ borderBottom: i < activeStakes.length - 1 ? '1px solid rgba(0,212,255,0.04)' : 'none' }}>
+              <div className="flex flex-wrap items-center gap-4 px-5 py-4">
+                <div className="flex items-center gap-3 flex-1 min-w-0">
+                  <div className="w-9 h-9 rounded-full flex items-center justify-center" style={{ background: (pool?.color ?? '#00D4FF') + '22' }}>
+                    <span style={{ fontSize: 12, fontWeight: 800, color: pool?.color ?? '#00D4FF' }}>{stake.asset[0]}</span>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 14, fontWeight: 600, color: '#E8F0FE' }}>{stake.asset}</div>
+                    <div style={{ fontSize: 11, color: '#5A7A9C' }}>
+                      {stake.lockPeriodDays > 0 ? `${stake.lockPeriodDays}d lock` : 'Flexible'} · {stake.amount.toLocaleString('en', { maximumFractionDigits: 6 })} {stake.asset}
+                    </div>
+                  </div>
                 </div>
-                <div>
-                  <div style={{ fontSize: 14, fontWeight: 600, color: '#E8F0FE' }}>{pool.name}</div>
-                  <div style={{ fontSize: 11, color: '#5A7A9C' }}>{pool.lockup} · {pool.staked} {pool.coin}</div>
-                </div>
-              </div>
-              <div className="flex items-center gap-6 flex-wrap">
-                <div>
-                  <div style={{ fontSize: 11, color: '#5A7A9C' }}>{d.staked}</div>
-                  <div style={{ fontFamily: 'var(--font-mono)', fontSize: 14, fontWeight: 600, color: '#E8F0FE' }}>{pool.usd}</div>
-                </div>
-                <div>
-                  <div style={{ fontSize: 11, color: '#5A7A9C' }}>Rewards</div>
-                  <div style={{ fontFamily: 'var(--font-mono)', fontSize: 14, fontWeight: 600, color: '#00C896' }}>{pool.rewardUsd}</div>
-                </div>
-                <div className="text-center">
-                  <div style={{ fontSize: 11, color: '#5A7A9C' }}>{d.apy}</div>
-                  <div style={{ fontFamily: 'var(--font-mono)', fontSize: 16, fontWeight: 700, color: '#F0B429' }}>{pool.apy}%</div>
-                </div>
-                <div className="flex gap-2">
-                  <button className="px-3 py-1.5 rounded-lg" style={{ background: 'rgba(0,212,255,0.1)', color: '#00D4FF', fontSize: 12, fontWeight: 600 }}>
-                    {d.stake}
-                  </button>
-                  <button className="px-3 py-1.5 rounded-lg" style={{ background: 'rgba(255,59,92,0.08)', color: '#FF3B5C', fontSize: 12, fontWeight: 600 }}>
-                    {d.unstake}
+                <div className="flex items-center gap-6 flex-wrap">
+                  <div>
+                    <div style={{ fontSize: 11, color: '#5A7A9C' }}>{d.staked}</div>
+                    <div style={{ fontFamily: 'var(--font-mono)', fontSize: 14, fontWeight: 600, color: '#E8F0FE' }}>${usd.toLocaleString('en', { maximumFractionDigits: 0 })}</div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 11, color: '#5A7A9C' }}>Rewards</div>
+                    <div style={{ fontFamily: 'var(--font-mono)', fontSize: 14, fontWeight: 600, color: '#00C896' }}>
+                      {stake.earned.toLocaleString('en', { maximumFractionDigits: 6 })} {stake.asset}
+                    </div>
+                  </div>
+                  <div className="text-center">
+                    <div style={{ fontSize: 11, color: '#5A7A9C' }}>{d.apy}</div>
+                    <div style={{ fontFamily: 'var(--font-mono)', fontSize: 16, fontWeight: 700, color: '#F0B429' }}>{stake.apy}%</div>
+                  </div>
+                  <button
+                    onClick={() => handleUnstake(stake.id)}
+                    disabled={busyId === stake.id}
+                    className="px-3 py-1.5 rounded-lg"
+                    style={{ background: 'rgba(255,59,92,0.08)', color: '#FF3B5C', fontSize: 12, fontWeight: 600, opacity: busyId === stake.id ? 0.6 : 1 }}
+                  >
+                    {busyId === stake.id ? '…' : d.unstake}
                   </button>
                 </div>
               </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       {/* Rewards chart + available pools */}
@@ -142,30 +170,57 @@ export function Staking() {
           <div className="px-4 py-3" style={{ borderBottom: '1px solid rgba(0,212,255,0.06)', fontSize: 13, fontWeight: 600, color: '#E8F0FE' }}>
             Available Pools
           </div>
-          {AVAILABLE_POOLS.map((pool, i) => (
-            <div
-              key={pool.coin + i}
-              className="flex items-center gap-3 px-4 py-2.5 transition-colors"
-              style={{ borderBottom: i < AVAILABLE_POOLS.length - 1 ? '1px solid rgba(0,212,255,0.04)' : 'none' }}
-              onMouseEnter={e => e.currentTarget.style.background = 'rgba(0,212,255,0.02)'}
-              onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-            >
-              <div className="w-7 h-7 rounded-full flex items-center justify-center" style={{ background: pool.color + '22' }}>
-                <span style={{ fontSize: 9, fontWeight: 700, color: pool.color }}>{pool.coin[0]}</span>
-              </div>
-              <div className="flex-1">
-                <div style={{ fontSize: 13, fontWeight: 600, color: '#E8F0FE' }}>{pool.name}</div>
-                <div style={{ fontSize: 11, color: '#5A7A9C' }}>Min: {pool.minStake} · {pool.lockup}</div>
-              </div>
-              <div style={{ fontFamily: 'var(--font-mono)', fontSize: 15, fontWeight: 700, color: '#F0B429', minWidth: 60, textAlign: 'right' }}>
-                {pool.apy}% <span style={{ fontSize: 10, color: '#5A7A9C' }}>APY</span>
-              </div>
-              <button
-                className="px-3 py-1 rounded-lg"
-                style={{ background: 'rgba(0,212,255,0.1)', color: '#00D4FF', fontSize: 11, fontWeight: 600 }}
+          {STAKING_POOLS.map((pool, i) => (
+            <div key={pool.id}>
+              <div
+                className="flex items-center gap-3 px-4 py-2.5 transition-colors"
+                style={{ borderBottom: stakeOpen === pool.id || i < STAKING_POOLS.length - 1 ? '1px solid rgba(0,212,255,0.04)' : 'none' }}
+                onMouseEnter={e => e.currentTarget.style.background = 'rgba(0,212,255,0.02)'}
+                onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
               >
-                {d.stake}
-              </button>
+                <div className="w-7 h-7 rounded-full flex items-center justify-center" style={{ background: pool.color + '22' }}>
+                  <span style={{ fontSize: 9, fontWeight: 700, color: pool.color }}>{pool.asset[0]}</span>
+                </div>
+                <div className="flex-1">
+                  <div style={{ fontSize: 13, fontWeight: 600, color: '#E8F0FE' }}>{pool.asset} Pool</div>
+                  <div style={{ fontSize: 11, color: '#5A7A9C' }}>
+                    Min: {pool.minAmount} {pool.asset} · {pool.lockPeriodDays > 0 ? `${pool.lockPeriodDays}d lock` : 'Flexible'}
+                  </div>
+                </div>
+                <div style={{ fontFamily: 'var(--font-mono)', fontSize: 15, fontWeight: 700, color: '#F0B429', minWidth: 60, textAlign: 'right' }}>
+                  {pool.apy}% <span style={{ fontSize: 10, color: '#5A7A9C' }}>APY</span>
+                </div>
+                <button
+                  onClick={() => { setStakeOpen(stakeOpen === pool.id ? null : pool.id); setError(''); }}
+                  className="px-3 py-1 rounded-lg"
+                  style={{ background: 'rgba(0,212,255,0.1)', color: '#00D4FF', fontSize: 11, fontWeight: 600 }}
+                >
+                  {d.stake}
+                </button>
+              </div>
+              {stakeOpen === pool.id && (
+                <div className="px-4 py-3 space-y-2" style={{ borderBottom: i < STAKING_POOLS.length - 1 ? '1px solid rgba(0,212,255,0.04)' : 'none', background: 'rgba(0,212,255,0.02)' }}>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      value={stakeAmount}
+                      onChange={e => setStakeAmount(e.target.value)}
+                      placeholder={`Min ${pool.minAmount} ${pool.asset}`}
+                      className="flex-1 px-3 py-2 rounded-lg outline-none"
+                      style={{ background: '#0D1E35', border: '1px solid rgba(0,212,255,0.12)', color: '#E8F0FE', fontSize: 13, fontFamily: 'var(--font-mono)' }}
+                    />
+                    <button
+                      onClick={() => handleStake(pool.id)}
+                      disabled={busyId === pool.id}
+                      className="px-4 py-2 rounded-lg"
+                      style={{ background: 'linear-gradient(135deg, #00D4FF, #0066FF)', color: '#050B14', fontWeight: 700, fontSize: 12, opacity: busyId === pool.id ? 0.7 : 1 }}
+                    >
+                      {busyId === pool.id ? '…' : 'Confirm'}
+                    </button>
+                  </div>
+                  {error && <p style={{ fontSize: 12, color: '#FF3B5C' }}>{error}</p>}
+                </div>
+              )}
             </div>
           ))}
         </div>

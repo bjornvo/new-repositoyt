@@ -1,25 +1,31 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
+import { useNavigate } from 'react-router';
 import {
   LayoutDashboard, Users, ArrowLeftRight, Settings, Shield,
   Megaphone, TrendingUp, TrendingDown, Activity, AlertTriangle,
-  Search, Filter, Ban, CheckCircle, XCircle, Eye, MoreVertical, Download,
+  Search, Filter, Ban, CheckCircle, XCircle, Eye, Download,
   DollarSign, Globe, Sliders, LogOut, Bell, Lock, Pencil, X
 } from 'lucide-react';
-import { updateKycStatus, adjustUserBalance } from '../../../services/admin';
+import { useAuth } from '../../context/AuthContext';
+import {
+  getAdminStats, getAdminUsers, getAdminTransactions, toggleUserSuspension,
+  updateKycStatus, adjustUserBalance,
+  getAnnouncements, createAnnouncement, toggleAnnouncement, deleteAnnouncement,
+  getPlatformSettings, updatePlatformSettings,
+  type AdminStats, type AdminUser, type AdminTransaction, type Announcement, type PlatformSettings,
+} from '../../../services/admin';
 import {
   AreaChart, Area, BarChart, Bar, LineChart, Line,
   ResponsiveContainer, Tooltip, XAxis, YAxis, CartesianGrid
 } from 'recharts';
 
-// ─── Mock data ────────────────────────────────────────────────────────────────
+// ─── Illustrative-only data (no backing table; not safe/worth modeling for a demo) ──
 const revenueData = [
-  { d: 'Jan', rev: 184000, users: 1820 }, { d: 'Feb', rev: 210000, users: 2100 },
-  { d: 'Mar', rev: 198000, users: 2340 }, { d: 'Apr', rev: 265000, users: 2890 },
-  { d: 'May', rev: 312000, users: 3210 }, { d: 'Jun', rev: 289000, users: 3560 },
-  { d: 'Jul', rev: 348000, users: 3920 }, { d: 'Aug', rev: 391000, users: 4180 },
-  { d: 'Sep', rev: 412000, users: 4620 }, { d: 'Oct', rev: 445000, users: 4980 },
-  { d: 'Nov', rev: 489000, users: 5340 }, { d: 'Dec', rev: 521000, users: 5820 },
+  { d: 'Jan', rev: 184000 }, { d: 'Feb', rev: 210000 }, { d: 'Mar', rev: 198000 },
+  { d: 'Apr', rev: 265000 }, { d: 'May', rev: 312000 }, { d: 'Jun', rev: 289000 },
+  { d: 'Jul', rev: 348000 }, { d: 'Aug', rev: 391000 }, { d: 'Sep', rev: 412000 },
+  { d: 'Oct', rev: 445000 }, { d: 'Nov', rev: 489000 }, { d: 'Dec', rev: 521000 },
 ];
 
 const volumeData = [
@@ -29,51 +35,9 @@ const volumeData = [
   { h: '18', v: 7.8 }, { h: '20', v: 5.4 }, { h: '22', v: 3.2 },
 ];
 
-interface AdminUserRow {
-  id: string;
-  name: string;
-  email: string;
-  country: string;
-  kyc: 'verified' | 'pending' | 'rejected';
-  plan: string;
-  balance: string;
-  joined: string;
-  status: 'active' | 'suspended';
-}
-
-const INITIAL_USERS: AdminUserRow[] = [
-  { id: 'U001', name: 'Alex Volkov', email: 'alex.v@gmail.com', country: 'RU', kyc: 'verified', plan: 'Pro', balance: '$74,832', joined: '2025-03-12', status: 'active' },
-  { id: 'U002', name: 'Sarah Chen', email: 'sarah.c@outlook.com', country: 'SG', kyc: 'verified', plan: 'Pro', balance: '$128,441', joined: '2025-01-08', status: 'active' },
-  { id: 'U003', name: 'Marcus Weber', email: 'm.weber@firm.ch', country: 'CH', kyc: 'verified', plan: 'Institutional', balance: '$2,140,000', joined: '2024-11-21', status: 'active' },
-  { id: 'U004', name: 'Priya Nair', email: 'priya.n@uae.ae', country: 'AE', kyc: 'verified', plan: 'Pro', balance: '$89,204', joined: '2025-02-17', status: 'active' },
-  { id: 'U005', name: 'Ivan Petrov', email: 'ivan.p@mail.ru', country: 'RU', kyc: 'pending', plan: 'Starter', balance: '$1,240', joined: '2026-06-08', status: 'active' },
-  { id: 'U006', name: 'Li Wei', email: 'li.wei@qq.com', country: 'CN', kyc: 'rejected', plan: 'Starter', balance: '$0', joined: '2026-06-09', status: 'suspended' },
-  { id: 'U007', name: 'Emma Johnson', email: 'emma.j@gmail.com', country: 'US', kyc: 'verified', plan: 'Pro', balance: '$42,180', joined: '2025-07-03', status: 'active' },
-  { id: 'U008', name: 'Omar Hassan', email: 'o.hassan@gmail.com', country: 'EG', kyc: 'pending', plan: 'Starter', balance: '$890', joined: '2026-06-05', status: 'active' },
-];
-
-// $74,832 → 74832 ; $2,140,000 → 2140000
-function parseBalance(s: string): number {
-  const n = Number(s.replace(/[^0-9.]/g, ''));
-  return Number.isFinite(n) ? n : 0;
-}
-function formatBalance(n: number): string {
-  return '$' + Math.round(n).toLocaleString('en-US');
-}
-
-const TRANSACTIONS_ADMIN = [
-  { id: 'TX001', user: 'Alex Volkov', type: 'swap', asset: 'ETH → BTC', amount: '$5,282', fee: '$15.85', status: 'completed', time: '14:23', flag: false },
-  { id: 'TX002', user: 'Marcus Weber', type: 'withdraw', asset: 'USDT', amount: '$250,000', fee: '$0', status: 'pending', time: '13:41', flag: true },
-  { id: 'TX003', user: 'Sarah Chen', type: 'deposit', asset: 'BTC', amount: '$48,200', fee: '$0', status: 'completed', time: '12:05', flag: false },
-  { id: 'TX004', user: 'Unknown', type: 'login', asset: '—', amount: '—', fee: '—', status: 'blocked', time: '11:30', flag: true },
-  { id: 'TX005', user: 'Priya Nair', type: 'stake', asset: 'ETH', amount: '$7,042', fee: '$0', status: 'completed', time: '09:12', flag: false },
-];
-
 const ALERTS = [
-  { id: 1, level: 'critical', msg: 'Large withdrawal flagged: $250,000 USDT from user U003', time: '2 min ago' },
-  { id: 2, level: 'warning', msg: 'Multiple failed login attempts on user U006 (5 attempts from CN)', time: '18 min ago' },
-  { id: 3, level: 'info', msg: 'KYC queue: 24 pending verifications', time: '1h ago' },
-  { id: 4, level: 'warning', msg: 'BTC/USDT spread widened to 0.12% on external liquidity', time: '2h ago' },
+  { id: 1, level: 'critical', msg: 'Large withdrawal flagged — review the Transactions tab', time: 'recent' },
+  { id: 2, level: 'info', msg: 'KYC queue: check the Users tab for pending verifications', time: '' },
 ];
 
 const SYSTEM_SERVICES = [
@@ -85,108 +49,82 @@ const SYSTEM_SERVICES = [
   { name: 'Email / Notify', status: 'operational', latency: '340ms', uptime: '99.91%' },
 ];
 
-type AdminTab = 'overview' | 'users' | 'transactions' | 'system' | 'announcements' | 'settings';
-
-interface Announcement {
-  id: number;
-  title: string;
-  body: string;
-  active: boolean;
-  type: 'info' | 'warning' | 'maintenance';
+function formatBalance(n: number): string {
+  return '$' + Math.round(n).toLocaleString('en-US');
 }
 
-const INITIAL_ANNOUNCEMENTS: Announcement[] = [
-  { id: 1, title: 'Scheduled Maintenance', body: 'Card processing will be unavailable Jun 15 02:00–04:00 UTC.', active: true, type: 'maintenance' },
-  { id: 2, title: 'New Feature: SOL Staking', body: 'Solana liquid staking now available with 7.2% APY.', active: false, type: 'info' },
-];
+type AdminTab = 'overview' | 'users' | 'transactions' | 'system' | 'announcements' | 'settings';
 
 const STATUS_COLOR: Record<string, string> = { operational: '#00C896', degraded: '#F0B429', outage: '#FF3B5C' };
 const KYC_COLOR: Record<string, string> = { verified: '#00C896', pending: '#F0B429', rejected: '#FF3B5C' };
 const ALERT_COLOR: Record<string, string> = { critical: '#FF3B5C', warning: '#F0B429', info: '#00D4FF' };
 
-// ─── Admin Gate ────────────────────────────────────────────────────────────────
-function AdminGate({ onEnter }: { onEnter: () => void }) {
-  const [pw, setPw] = useState('');
-  const [err, setErr] = useState('');
-  const [loading, setLoading] = useState(false);
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (pw === 'admin2026') { setLoading(true); setTimeout(onEnter, 800); }
-    else setErr('Incorrect password.');
-  };
+// ─── Access gate ──────────────────────────────────────────────────────────────
+function AccessMessage({ icon: Icon, title, body, action }: { icon: React.ElementType; title: string; body: string; action?: React.ReactNode }) {
   return (
     <div className="min-h-screen flex items-center justify-center" style={{ background: '#030810' }}>
-      <div className="absolute inset-0 opacity-10 pointer-events-none" style={{
-        backgroundImage: `linear-gradient(rgba(0,212,255,0.07) 1px, transparent 1px), linear-gradient(90deg, rgba(0,212,255,0.07) 1px, transparent 1px)`,
-        backgroundSize: '40px 40px',
-      }} />
-      <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }}
-        className="p-8 rounded-2xl w-full max-w-sm relative"
-        style={{ background: '#0A1628', border: '1px solid rgba(0,212,255,0.15)', boxShadow: '0 0 80px rgba(0,0,0,0.6)' }}>
-        <div className="text-center mb-7">
-          <div className="w-14 h-14 rounded-2xl flex items-center justify-center mx-auto mb-4"
-            style={{ background: 'rgba(240,180,41,0.1)', border: '1px solid rgba(240,180,41,0.2)' }}>
-            <Lock size={24} style={{ color: '#F0B429' }} />
-          </div>
-          <h2 style={{ fontSize: 20, fontWeight: 800, color: '#E8F0FE' }}>Admin Access</h2>
-          <p style={{ fontSize: 13, color: '#5A7A9C', marginTop: 4 }}>Restricted area. Enter admin credentials.</p>
+      <div className="p-8 rounded-2xl w-full max-w-sm text-center" style={{ background: '#0A1628', border: '1px solid rgba(0,212,255,0.15)' }}>
+        <div className="w-14 h-14 rounded-2xl flex items-center justify-center mx-auto mb-4" style={{ background: 'rgba(240,180,41,0.1)', border: '1px solid rgba(240,180,41,0.2)' }}>
+          <Icon size={24} style={{ color: '#F0B429' }} />
         </div>
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <input
-            type="password"
-            value={pw}
-            onChange={e => { setPw(e.target.value); setErr(''); }}
-            placeholder="Admin password"
-            className="w-full px-4 py-3 rounded-xl outline-none transition-all"
-            style={{ background: '#0D1E35', border: `1px solid ${err ? 'rgba(255,59,92,0.4)' : 'rgba(0,212,255,0.1)'}`, color: '#E8F0FE', fontSize: 14 }}
-            onFocus={e => e.target.style.borderColor = 'rgba(0,212,255,0.35)'}
-            onBlur={e => e.target.style.borderColor = err ? 'rgba(255,59,92,0.4)' : 'rgba(0,212,255,0.1)'}
-          />
-          {err && <p style={{ fontSize: 12, color: '#FF3B5C' }}>{err}</p>}
-          <button type="submit" className="w-full py-3 rounded-xl"
-            style={{ background: 'linear-gradient(135deg, #F0B429, #FF8C00)', color: '#050B14', fontWeight: 700, fontSize: 14 }}>
-            {loading ? 'Verifying...' : 'Enter Admin Panel'}
-          </button>
-        </form>
-      </motion.div>
+        <h2 style={{ fontSize: 20, fontWeight: 800, color: '#E8F0FE' }}>{title}</h2>
+        <p style={{ fontSize: 13, color: '#5A7A9C', marginTop: 8 }}>{body}</p>
+        {action}
+      </div>
     </div>
   );
 }
 
 // ─── Main Admin ────────────────────────────────────────────────────────────────
 export function AdminPage() {
-  const [authed, setAuthed] = useState(false);
+  const { user, loading: authLoading, logout } = useAuth();
+  const navigate = useNavigate();
   const [tab, setTab] = useState<AdminTab>('overview');
   const [userSearch, setUserSearch] = useState('');
-  const [announcements, setAnnouncements] = useState<Announcement[]>(INITIAL_ANNOUNCEMENTS);
+
+  const [stats, setStats] = useState<AdminStats | null>(null);
+  const [users, setUsers] = useState<AdminUser[]>([]);
+  const [usersTotal, setUsersTotal] = useState(0);
+  const [transactions, setTransactions] = useState<AdminTransaction[]>([]);
+  const [announcements, setAnnouncements] = useState<Announcement[]>([]);
+  const [settings, setSettings] = useState<PlatformSettings | null>(null);
+
   const [newAnnTitle, setNewAnnTitle] = useState('');
   const [newAnnBody, setNewAnnBody] = useState('');
   const [newAnnType, setNewAnnType] = useState<'info' | 'warning' | 'maintenance'>('info');
-  const [fees, setFees] = useState({ spot: '0.30', withdrawal: '0.50', staking: '0.00' });
-  const [limits, setLimits] = useState({ dailyWithdraw: '500000', kycLevel1: '10000', kycLevel2: '1000000' });
 
-  const [users, setUsers] = useState<AdminUserRow[]>(INITIAL_USERS);
-  const [editUser, setEditUser] = useState<AdminUserRow | null>(null);
+  const [editUser, setEditUser] = useState<AdminUser | null>(null);
   const [editValue, setEditValue] = useState('');
   const [savingId, setSavingId] = useState<string | null>(null);
+  const [savingSettings, setSavingSettings] = useState(false);
 
-  // KYC: optimistic UI update, then persist (no-op in mock mode).
-  async function handleKyc(user: AdminUserRow, status: AdminUserRow['kyc']) {
-    setUsers(prev => prev.map(u => (u.id === user.id ? { ...u, kyc: status } : u)));
-    setSavingId(user.id);
+  const isAdmin = Boolean(user?.isAdmin);
+
+  useEffect(() => {
+    if (!isAdmin) return;
+    getAdminStats().then(setStats);
+    getAdminUsers().then(r => { setUsers(r.users); setUsersTotal(r.total); });
+    getAdminTransactions().then(setTransactions);
+    getAnnouncements().then(setAnnouncements);
+    getPlatformSettings().then(setSettings);
+  }, [isAdmin]);
+
+  // KYC: optimistic UI update, then persist.
+  async function handleKyc(u: AdminUser, status: AdminUser['kycStatus']) {
+    setUsers(prev => prev.map(x => (x.id === u.id ? { ...x, kycStatus: status } : x)));
+    setSavingId(u.id);
     try {
-      await updateKycStatus(user.id, status);
-    } catch (e) {
-      // revert on failure
-      setUsers(prev => prev.map(u => (u.id === user.id ? { ...u, kyc: user.kyc } : u)));
+      await updateKycStatus(u.id, status);
+    } catch {
+      setUsers(prev => prev.map(x => (x.id === u.id ? { ...x, kycStatus: u.kycStatus } : x)));
     } finally {
       setSavingId(null);
     }
   }
 
-  function openBalanceEditor(user: AdminUserRow) {
-    setEditUser(user);
-    setEditValue(String(parseBalance(user.balance)));
+  function openBalanceEditor(u: AdminUser) {
+    setEditUser(u);
+    setEditValue(String(Math.round(u.balanceUsd)));
   }
 
   async function handleBalanceSave() {
@@ -194,32 +132,86 @@ export function AdminPage() {
     const value = Number(editValue);
     if (!Number.isFinite(value) || value < 0) return;
     const target = editUser;
-    const formatted = formatBalance(value);
-    setUsers(prev => prev.map(u => (u.id === target.id ? { ...u, balance: formatted } : u)));
+    setUsers(prev => prev.map(u => (u.id === target.id ? { ...u, balanceUsd: value } : u)));
     setEditUser(null);
     setSavingId(target.id);
     try {
       await adjustUserBalance(target.id, value);
-    } catch (e) {
-      setUsers(prev => prev.map(u => (u.id === target.id ? { ...u, balance: target.balance } : u)));
+    } catch {
+      setUsers(prev => prev.map(u => (u.id === target.id ? { ...u, balanceUsd: target.balanceUsd } : u)));
     } finally {
       setSavingId(null);
     }
   }
 
-  function toggleSuspend(user: AdminUserRow) {
-    setUsers(prev => prev.map(u =>
-      u.id === user.id ? { ...u, status: u.status === 'suspended' ? 'active' : 'suspended' } : u
-    ));
+  async function toggleSuspend(u: AdminUser) {
+    const next = !u.isSuspended;
+    setUsers(prev => prev.map(x => (x.id === u.id ? { ...x, isSuspended: next } : x)));
+    try {
+      await toggleUserSuspension(u.id, next);
+    } catch {
+      setUsers(prev => prev.map(x => (x.id === u.id ? { ...x, isSuspended: u.isSuspended } : x)));
+    }
+  }
+
+  async function handlePublishAnnouncement() {
+    if (!newAnnTitle || !newAnnBody || !user) return;
+    const created = await createAnnouncement(user.id, { title: newAnnTitle, body: newAnnBody, type: newAnnType });
+    setAnnouncements(prev => [created, ...prev]);
+    setNewAnnTitle(''); setNewAnnBody('');
+  }
+
+  async function handleSaveSettings() {
+    if (!settings) return;
+    setSavingSettings(true);
+    try {
+      await updatePlatformSettings(settings);
+    } finally {
+      setSavingSettings(false);
+    }
   }
 
   const filteredUsers = users.filter(u =>
-    u.name.toLowerCase().includes(userSearch.toLowerCase()) ||
+    `${u.firstName} ${u.lastName}`.toLowerCase().includes(userSearch.toLowerCase()) ||
     u.email.toLowerCase().includes(userSearch.toLowerCase()) ||
     u.id.toLowerCase().includes(userSearch.toLowerCase())
   );
 
-  if (!authed) return <AdminGate onEnter={() => setAuthed(true)} />;
+  if (authLoading) {
+    return <AccessMessage icon={Lock} title="Loading…" body="Checking your session." />;
+  }
+
+  if (!user) {
+    return (
+      <AccessMessage
+        icon={Lock}
+        title="Sign in required"
+        body="The admin panel is only available to signed-in administrators."
+        action={
+          <button onClick={() => navigate('/login')} className="w-full mt-5 py-3 rounded-xl"
+            style={{ background: 'linear-gradient(135deg, #F0B429, #FF8C00)', color: '#050B14', fontWeight: 700, fontSize: 14 }}>
+            Go to Login
+          </button>
+        }
+      />
+    );
+  }
+
+  if (!isAdmin) {
+    return (
+      <AccessMessage
+        icon={Shield}
+        title="Access denied"
+        body={`Signed in as ${user.email}, but this account doesn't have admin privileges.`}
+        action={
+          <button onClick={() => navigate('/dashboard')} className="w-full mt-5 py-3 rounded-xl"
+            style={{ background: 'rgba(0,212,255,0.1)', color: '#00D4FF', fontWeight: 700, fontSize: 14 }}>
+            Back to Dashboard
+          </button>
+        }
+      />
+    );
+  }
 
   const NAV: { id: AdminTab; icon: React.ElementType; label: string }[] = [
     { id: 'overview', icon: LayoutDashboard, label: 'Overview' },
@@ -230,14 +222,14 @@ export function AdminPage() {
     { id: 'settings', icon: Sliders, label: 'Platform Settings' },
   ];
 
-  const OVERVIEW_STATS = [
-    { label: 'Total Users', value: '2,419,847', change: '+3.2%', icon: Users, color: '#00D4FF', up: true },
-    { label: 'Monthly Revenue', value: '$521,000', change: '+16.2%', icon: DollarSign, color: '#00C896', up: true },
-    { label: '24h Volume', value: '$84.2M', change: '-2.1%', icon: ArrowLeftRight, color: '#F0B429', up: false },
-    { label: 'Active Sessions', value: '14,829', change: '+8.4%', icon: Globe, color: '#A855F7', up: true },
-    { label: 'KYC Pending', value: '24', change: '+12', icon: Shield, color: '#F0B429', up: false },
-    { label: 'Open Alerts', value: '4', change: '1 critical', icon: AlertTriangle, color: '#FF3B5C', up: false },
-  ];
+  const OVERVIEW_STATS = stats ? [
+    { label: 'Total Users', value: stats.totalUsers.toLocaleString(), icon: Users, color: '#00D4FF' },
+    { label: 'Platform Revenue', value: `$${stats.revenue.toLocaleString('en', { maximumFractionDigits: 0 })}`, icon: DollarSign, color: '#00C896' },
+    { label: 'Total Volume', value: `$${stats.totalVolume.toLocaleString('en', { maximumFractionDigits: 0 })}`, icon: ArrowLeftRight, color: '#F0B429' },
+    { label: 'Active Users', value: stats.activeUsers.toLocaleString(), icon: Globe, color: '#A855F7' },
+    { label: 'Total Staked (units)', value: stats.totalStaked.toLocaleString('en', { maximumFractionDigits: 0 }), icon: Shield, color: '#F0B429' },
+    { label: 'New Users Today', value: stats.newUsersToday.toLocaleString(), icon: TrendingUp, color: '#FF3B5C' },
+  ] : [];
 
   return (
     <div className="flex min-h-screen" style={{ background: '#030810' }}>
@@ -281,9 +273,9 @@ export function AdminPage() {
         {/* Bottom */}
         <div className="px-3 pb-4" style={{ borderTop: '1px solid rgba(240,180,41,0.06)' }}>
           <div className="px-3 py-2.5 mb-1" style={{ fontSize: 11, color: '#3A5A7C' }}>
-            Logged in as <span style={{ color: '#F0B429' }}>superadmin</span>
+            Logged in as <span style={{ color: '#F0B429' }}>{user.firstName || user.email}</span>
           </div>
-          <button onClick={() => setAuthed(false)}
+          <button onClick={async () => { await logout(); navigate('/'); }}
             className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl transition-all"
             style={{ color: '#5A7A9C', fontSize: 13 }}
             onMouseEnter={e => { e.currentTarget.style.color = '#FF3B5C'; e.currentTarget.style.background = 'rgba(255,59,92,0.06)'; }}
@@ -305,13 +297,11 @@ export function AdminPage() {
             <div style={{ fontSize: 12, color: '#5A7A9C' }}>NovaCrypt Admin · {new Date().toLocaleString()}</div>
           </div>
           <div className="ml-auto flex items-center gap-3">
-            <div className="relative">
-              <button className="relative w-9 h-9 rounded-xl flex items-center justify-center"
-                style={{ background: '#0A1628', border: '1px solid rgba(240,180,41,0.1)' }}>
-                <Bell size={15} style={{ color: '#5A7A9C' }} />
-                <div className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full" style={{ background: '#FF3B5C', border: '1.5px solid #030810' }} />
-              </button>
-            </div>
+            <button className="relative w-9 h-9 rounded-xl flex items-center justify-center"
+              style={{ background: '#0A1628', border: '1px solid rgba(240,180,41,0.1)' }}>
+              <Bell size={15} style={{ color: '#5A7A9C' }} />
+              <div className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full" style={{ background: '#FF3B5C', border: '1.5px solid #030810' }} />
+            </button>
             <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl"
               style={{ background: 'rgba(240,180,41,0.08)', border: '1px solid rgba(240,180,41,0.15)' }}>
               <Shield size={13} style={{ color: '#F0B429' }} />
@@ -324,23 +314,23 @@ export function AdminPage() {
         <div className="flex-1 p-6 overflow-auto space-y-5">
 
           {/* ── OVERVIEW ── */}
-          {tab === 'overview' && (
+          {tab === 'overview' && stats && (
             <>
-              {/* Alerts banner */}
-              {ALERTS.filter(a => a.level === 'critical').map(alert => (
-                <div key={alert.id} className="flex items-start gap-3 p-4 rounded-xl"
+              {transactions.some(tx => tx.flagged) && (
+                <div className="flex items-start gap-3 p-4 rounded-xl"
                   style={{ background: 'rgba(255,59,92,0.08)', border: '1px solid rgba(255,59,92,0.25)' }}>
                   <AlertTriangle size={18} style={{ color: '#FF3B5C', flexShrink: 0, marginTop: 1 }} />
                   <div>
                     <span style={{ fontSize: 13, fontWeight: 600, color: '#FF3B5C' }}>CRITICAL: </span>
-                    <span style={{ fontSize: 13, color: '#E8F0FE' }}>{alert.msg}</span>
-                    <span style={{ fontSize: 11, color: '#5A7A9C', marginLeft: 8 }}>{alert.time}</span>
+                    <span style={{ fontSize: 13, color: '#E8F0FE' }}>
+                      {transactions.filter(tx => tx.flagged).length} transaction(s) above ${(100_000).toLocaleString()} need review.
+                    </span>
                   </div>
-                  <button className="ml-auto px-3 py-1 rounded-lg" style={{ background: 'rgba(255,59,92,0.15)', color: '#FF3B5C', fontSize: 11, fontWeight: 700 }}>
+                  <button onClick={() => setTab('transactions')} className="ml-auto px-3 py-1 rounded-lg" style={{ background: 'rgba(255,59,92,0.15)', color: '#FF3B5C', fontSize: 11, fontWeight: 700 }}>
                     Review
                   </button>
                 </div>
-              ))}
+              )}
 
               {/* Stats grid */}
               <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
@@ -353,10 +343,6 @@ export function AdminPage() {
                       </div>
                     </div>
                     <div style={{ fontFamily: 'var(--font-mono)', fontSize: 22, fontWeight: 700, color: '#E8F0FE' }}>{s.value}</div>
-                    <div className="flex items-center gap-1 mt-1">
-                      {s.up ? <TrendingUp size={12} style={{ color: '#00C896' }} /> : <TrendingDown size={12} style={{ color: '#FF3B5C' }} />}
-                      <span style={{ fontSize: 12, fontFamily: 'var(--font-mono)', color: s.up ? '#00C896' : '#FF3B5C' }}>{s.change}</span>
-                    </div>
                   </div>
                 ))}
               </div>
@@ -364,7 +350,7 @@ export function AdminPage() {
               {/* Charts */}
               <div className="grid lg:grid-cols-2 gap-4">
                 <div className="p-5 rounded-2xl" style={{ background: '#0A1628', border: '1px solid rgba(0,212,255,0.08)' }}>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: '#E8F0FE', marginBottom: 12 }}>Monthly Revenue ($)</div>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: '#E8F0FE', marginBottom: 12 }}>Monthly Revenue ($) — illustrative</div>
                   <div className="h-44">
                     <ResponsiveContainer width="100%" height="100%">
                       <AreaChart data={revenueData}>
@@ -384,7 +370,7 @@ export function AdminPage() {
                   </div>
                 </div>
                 <div className="p-5 rounded-2xl" style={{ background: '#0A1628', border: '1px solid rgba(0,212,255,0.08)' }}>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: '#E8F0FE', marginBottom: 12 }}>24h Trading Volume ($B)</div>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: '#E8F0FE', marginBottom: 12 }}>24h Trading Volume ($B) — illustrative</div>
                   <div className="h-44">
                     <ResponsiveContainer width="100%" height="100%">
                       <BarChart data={volumeData}>
@@ -439,39 +425,37 @@ export function AdminPage() {
 
               <div className="rounded-2xl overflow-hidden" style={{ background: '#0A1628', border: '1px solid rgba(0,212,255,0.08)' }}>
                 <div className="grid px-5 py-3"
-                  style={{ gridTemplateColumns: '70px 1fr 1fr 60px 160px 90px 150px 70px',
+                  style={{ gridTemplateColumns: '1fr 1fr 110px 90px 150px 70px',
                     borderBottom: '1px solid rgba(0,212,255,0.06)', fontSize: 11, fontWeight: 700, color: '#5A7A9C', letterSpacing: 0.5, textTransform: 'uppercase' }}>
-                  <span>ID</span><span>Name</span><span>Email</span><span>Country</span>
+                  <span>Name</span><span>Email</span>
                   <span>KYC</span><span>Plan</span><span>Balance</span><span>Actions</span>
                 </div>
                 {filteredUsers.map((u, i) => (
                   <div key={u.id} className="grid items-center px-5 py-3 transition-colors"
-                    style={{ gridTemplateColumns: '70px 1fr 1fr 60px 160px 90px 150px 70px',
+                    style={{ gridTemplateColumns: '1fr 1fr 110px 90px 150px 70px',
                       borderBottom: i < filteredUsers.length - 1 ? '1px solid rgba(0,212,255,0.04)' : 'none',
                       opacity: savingId === u.id ? 0.6 : 1 }}
                     onMouseEnter={e => e.currentTarget.style.background = 'rgba(0,212,255,0.02)'}
                     onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
                   >
-                    <span style={{ fontSize: 12, color: '#5A7A9C', fontFamily: 'var(--font-mono)' }}>{u.id}</span>
                     <div>
-                      <div style={{ fontSize: 13, fontWeight: 600, color: '#E8F0FE' }}>{u.name}</div>
-                      <div style={{ fontSize: 11, color: '#5A7A9C' }}>Joined {u.joined}</div>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: '#E8F0FE' }}>{u.firstName} {u.lastName}</div>
+                      <div style={{ fontSize: 11, color: '#5A7A9C' }}>Joined {new Date(u.createdAt).toLocaleDateString()}{u.isSuspended ? ' · Suspended' : ''}</div>
                     </div>
                     <span style={{ fontSize: 12, color: '#5A7A9C' }}>{u.email}</span>
-                    <span style={{ fontSize: 13, color: '#E8F0FE' }}>{u.country}</span>
                     <div className="flex items-center gap-1.5">
                       <span className="px-2 py-0.5 rounded-full text-center"
-                        style={{ fontSize: 11, color: KYC_COLOR[u.kyc], background: KYC_COLOR[u.kyc] + '18', width: 'fit-content' }}>
-                        {u.kyc}
+                        style={{ fontSize: 11, color: KYC_COLOR[u.kycStatus], background: KYC_COLOR[u.kycStatus] + '18', width: 'fit-content' }}>
+                        {u.kycStatus}
                       </span>
-                      {u.kyc !== 'verified' && (
+                      {u.kycStatus !== 'verified' && (
                         <button onClick={() => handleKyc(u, 'verified')} disabled={savingId === u.id}
                           className="w-6 h-6 rounded-lg flex items-center justify-center"
                           style={{ background: 'rgba(0,200,150,0.1)' }} title="Approve KYC">
                           <CheckCircle size={12} style={{ color: '#00C896' }} />
                         </button>
                       )}
-                      {u.kyc !== 'rejected' && (
+                      {u.kycStatus !== 'rejected' && (
                         <button onClick={() => handleKyc(u, 'rejected')} disabled={savingId === u.id}
                           className="w-6 h-6 rounded-lg flex items-center justify-center"
                           style={{ background: 'rgba(255,59,92,0.1)' }} title="Reject KYC">
@@ -481,7 +465,7 @@ export function AdminPage() {
                     </div>
                     <span style={{ fontSize: 12, color: '#E8F0FE' }}>{u.plan}</span>
                     <div className="flex items-center gap-1.5">
-                      <span style={{ fontSize: 13, fontWeight: 600, color: '#E8F0FE', fontFamily: 'var(--font-mono)' }}>{u.balance}</span>
+                      <span style={{ fontSize: 13, fontWeight: 600, color: '#E8F0FE', fontFamily: 'var(--font-mono)' }}>{formatBalance(u.balanceUsd)}</span>
                       <button onClick={() => openBalanceEditor(u)} disabled={savingId === u.id}
                         className="w-6 h-6 rounded-lg flex items-center justify-center shrink-0"
                         style={{ background: 'rgba(240,180,41,0.1)' }} title="Edit balance">
@@ -496,9 +480,9 @@ export function AdminPage() {
                       </button>
                       <button onClick={() => toggleSuspend(u)}
                         className="w-6 h-6 rounded-lg flex items-center justify-center"
-                        style={{ background: u.status === 'suspended' ? 'rgba(0,200,150,0.08)' : 'rgba(255,59,92,0.08)' }}
-                        title={u.status === 'suspended' ? 'Activate' : 'Suspend'}>
-                        {u.status === 'suspended'
+                        style={{ background: u.isSuspended ? 'rgba(0,200,150,0.08)' : 'rgba(255,59,92,0.08)' }}
+                        title={u.isSuspended ? 'Activate' : 'Suspend'}>
+                        {u.isSuspended
                           ? <CheckCircle size={11} style={{ color: '#00C896' }} />
                           : <Ban size={11} style={{ color: '#FF3B5C' }} />
                         }
@@ -508,8 +492,11 @@ export function AdminPage() {
                 ))}
               </div>
               <div style={{ fontSize: 12, color: '#5A7A9C', textAlign: 'center' }}>
-                Showing {filteredUsers.length} of {users.length} users · Total registered: 2,419,847
+                Showing {filteredUsers.length} of {usersTotal} users
               </div>
+              <p style={{ fontSize: 11, color: '#3A5A7C', textAlign: 'center' }}>
+                Suspending a user here flags their profile; it doesn't yet revoke their login session (that requires a server-side admin key).
+              </p>
             </>
           )}
 
@@ -518,10 +505,10 @@ export function AdminPage() {
             <>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-1">
                 {[
-                  { label: '24h Transactions', value: '48,291', color: '#00D4FF' },
-                  { label: '24h Volume', value: '$84.2M', color: '#00C896' },
-                  { label: 'Flagged', value: '7', color: '#FF3B5C' },
-                  { label: 'Pending Review', value: '3', color: '#F0B429' },
+                  { label: 'Transactions Loaded', value: String(transactions.length), color: '#00D4FF' },
+                  { label: 'Total Volume (loaded)', value: `$${transactions.reduce((s, tx) => s + tx.amountUsd, 0).toLocaleString('en', { maximumFractionDigits: 0 })}`, color: '#00C896' },
+                  { label: 'Flagged', value: String(transactions.filter(tx => tx.flagged).length), color: '#FF3B5C' },
+                  { label: 'Pending', value: String(transactions.filter(tx => tx.status === 'pending').length), color: '#F0B429' },
                 ].map((s, i) => (
                   <div key={i} className="p-4 rounded-xl" style={{ background: '#0A1628', border: '1px solid rgba(0,212,255,0.08)' }}>
                     <div style={{ fontSize: 11, color: '#5A7A9C', marginBottom: 3 }}>{s.label}</div>
@@ -531,35 +518,37 @@ export function AdminPage() {
               </div>
               <div className="rounded-2xl overflow-hidden" style={{ background: '#0A1628', border: '1px solid rgba(0,212,255,0.08)' }}>
                 <div className="flex items-center justify-between px-5 py-3" style={{ borderBottom: '1px solid rgba(0,212,255,0.06)' }}>
-                  <span style={{ fontSize: 13, fontWeight: 600, color: '#E8F0FE' }}>Recent Transactions</span>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: '#E8F0FE' }}>Recent Transactions (all users)</span>
                   <button className="flex items-center gap-1.5 px-3 py-1 rounded-lg" style={{ background: 'rgba(0,212,255,0.08)', color: '#00D4FF', fontSize: 12 }}>
                     <Download size={12} /> Export
                   </button>
                 </div>
-                {TRANSACTIONS_ADMIN.map((tx, i) => (
+                {transactions.length === 0 && (
+                  <div className="px-5 py-6 text-center" style={{ color: '#5A7A9C', fontSize: 13 }}>No transactions yet.</div>
+                )}
+                {transactions.map((tx, i) => (
                   <div key={tx.id} className="grid items-center px-5 py-3 transition-colors"
-                    style={{ gridTemplateColumns: '80px 1fr 120px 110px 80px 100px 60px',
-                      borderBottom: i < TRANSACTIONS_ADMIN.length - 1 ? '1px solid rgba(0,212,255,0.04)' : 'none' }}
+                    style={{ gridTemplateColumns: '1fr 120px 130px 90px 100px 40px',
+                      borderBottom: i < transactions.length - 1 ? '1px solid rgba(0,212,255,0.04)' : 'none' }}
                     onMouseEnter={e => e.currentTarget.style.background = 'rgba(0,212,255,0.02)'}
                     onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
                   >
-                    <span style={{ fontSize: 11, color: '#5A7A9C', fontFamily: 'var(--font-mono)' }}>{tx.id}</span>
                     <div>
-                      <div style={{ fontSize: 13, fontWeight: 500, color: '#E8F0FE' }}>{tx.user}</div>
-                      <div style={{ fontSize: 11, color: '#5A7A9C' }}>{tx.time}</div>
+                      <div style={{ fontSize: 13, fontWeight: 500, color: '#E8F0FE' }}>{tx.userLabel}</div>
+                      <div style={{ fontSize: 11, color: '#5A7A9C' }}>{new Date(tx.createdAt).toLocaleString()}</div>
                     </div>
                     <span className="px-2 py-0.5 rounded-lg capitalize"
                       style={{ fontSize: 11, fontWeight: 700, background: 'rgba(0,212,255,0.08)', color: '#00D4FF', width: 'fit-content' }}>
                       {tx.type}
                     </span>
-                    <span style={{ fontSize: 13, fontWeight: 600, color: '#E8F0FE', fontFamily: 'var(--font-mono)' }}>{tx.amount}</span>
-                    <span style={{ fontSize: 12, color: '#5A7A9C', fontFamily: 'var(--font-mono)' }}>{tx.fee}</span>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: '#E8F0FE', fontFamily: 'var(--font-mono)' }}>${tx.amountUsd.toLocaleString('en', { maximumFractionDigits: 2 })}</span>
+                    <span style={{ fontSize: 12, color: '#5A7A9C', fontFamily: 'var(--font-mono)' }}>${tx.fee.toFixed(2)}</span>
                     <span className="px-2 py-0.5 rounded-full"
                       style={{ fontSize: 11, color: tx.status === 'completed' ? '#00C896' : tx.status === 'pending' ? '#F0B429' : '#FF3B5C',
                         background: (tx.status === 'completed' ? '#00C896' : tx.status === 'pending' ? '#F0B429' : '#FF3B5C') + '15', width: 'fit-content' }}>
                       {tx.status}
                     </span>
-                    {tx.flag && (
+                    {tx.flagged && (
                       <div className="flex items-center justify-center">
                         <AlertTriangle size={14} style={{ color: '#FF3B5C' }} />
                       </div>
@@ -573,6 +562,9 @@ export function AdminPage() {
           {/* ── SYSTEM HEALTH ── */}
           {tab === 'system' && (
             <>
+              <p style={{ fontSize: 11, color: '#3A5A7C' }}>
+                Service status below is illustrative — there's no real infra behind this demo to monitor.
+              </p>
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
                 {SYSTEM_SERVICES.map((svc, i) => (
                   <div key={i} className="p-4 rounded-xl" style={{ background: '#0A1628', border: `1px solid ${STATUS_COLOR[svc.status]}20` }}>
@@ -596,12 +588,11 @@ export function AdminPage() {
                   </div>
                 ))}
               </div>
-              {/* Uptime chart */}
               <div className="p-5 rounded-2xl" style={{ background: '#0A1628', border: '1px solid rgba(0,212,255,0.08)' }}>
-                <div style={{ fontSize: 13, fontWeight: 600, color: '#E8F0FE', marginBottom: 12 }}>API Response Time (ms) — Last 24h</div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: '#E8F0FE', marginBottom: 12 }}>API Response Time (ms) — illustrative</div>
                 <div className="h-44">
                   <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={volumeData.map(d => ({ ...d, ms: Math.round(d.v * 8 + 8) }))}>
+                    <LineChart data={volumeData.map(dd => ({ ...dd, ms: Math.round(dd.v * 8 + 8) }))}>
                       <XAxis dataKey="h" tick={{ fontSize: 10, fill: '#5A7A9C' }} axisLine={false} tickLine={false} />
                       <YAxis tick={{ fontSize: 10, fill: '#5A7A9C' }} axisLine={false} tickLine={false} />
                       <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,212,255,0.05)" />
@@ -652,11 +643,7 @@ export function AdminPage() {
                       onBlur={e => e.target.style.borderColor = 'rgba(0,212,255,0.1)'} />
                   </div>
                   <button
-                    onClick={() => {
-                      if (!newAnnTitle || !newAnnBody) return;
-                      setAnnouncements(prev => [...prev, { id: Date.now(), title: newAnnTitle, body: newAnnBody, active: true, type: newAnnType }]);
-                      setNewAnnTitle(''); setNewAnnBody('');
-                    }}
+                    onClick={handlePublishAnnouncement}
                     className="w-full py-2.5 rounded-xl"
                     style={{ background: 'linear-gradient(135deg, #00D4FF, #0066FF)', color: '#050B14', fontWeight: 700, fontSize: 13 }}>
                     Publish Announcement
@@ -666,7 +653,8 @@ export function AdminPage() {
 
               {/* Existing */}
               <div className="space-y-3">
-                <div style={{ fontSize: 14, fontWeight: 600, color: '#E8F0FE' }}>Active Announcements</div>
+                <div style={{ fontSize: 14, fontWeight: 600, color: '#E8F0FE' }}>Announcements</div>
+                {announcements.length === 0 && <p style={{ fontSize: 13, color: '#5A7A9C' }}>No announcements yet.</p>}
                 {announcements.map(ann => (
                   <div key={ann.id} className="p-4 rounded-xl" style={{ background: '#0A1628', border: '1px solid rgba(0,212,255,0.08)' }}>
                     <div className="flex items-start justify-between gap-2 mb-1">
@@ -679,14 +667,20 @@ export function AdminPage() {
                       </div>
                       <div className="flex gap-1.5 flex-shrink-0">
                         <button
-                          onClick={() => setAnnouncements(prev => prev.map(a => a.id === ann.id ? { ...a, active: !a.active } : a))}
+                          onClick={async () => {
+                            const next = !ann.active;
+                            setAnnouncements(prev => prev.map(a => a.id === ann.id ? { ...a, active: next } : a));
+                            await toggleAnnouncement(ann.id, next);
+                          }}
                           className="relative w-9 h-5 rounded-full transition-all duration-300"
                           style={{ background: ann.active ? '#00D4FF' : 'rgba(255,255,255,0.1)' }}>
                           <div className="absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all duration-300"
                             style={{ left: ann.active ? 'calc(100% - 18px)' : 2 }} />
                         </button>
-                        <button onClick={() => setAnnouncements(prev => prev.filter(a => a.id !== ann.id))}
-                          style={{ fontSize: 11, color: '#FF3B5C' }}>✕</button>
+                        <button onClick={async () => {
+                          setAnnouncements(prev => prev.filter(a => a.id !== ann.id));
+                          await deleteAnnouncement(ann.id);
+                        }} style={{ fontSize: 11, color: '#FF3B5C' }}>✕</button>
                       </div>
                     </div>
                     <p style={{ fontSize: 12, color: '#5A7A9C', lineHeight: 1.6 }}>{ann.body}</p>
@@ -698,22 +692,22 @@ export function AdminPage() {
           )}
 
           {/* ── SETTINGS ── */}
-          {tab === 'settings' && (
+          {tab === 'settings' && settings && (
             <div className="grid lg:grid-cols-2 gap-5">
               {/* Fee settings */}
               <div className="p-5 rounded-2xl" style={{ background: '#0A1628', border: '1px solid rgba(0,212,255,0.08)' }}>
                 <div style={{ fontSize: 14, fontWeight: 700, color: '#E8F0FE', marginBottom: 14 }}>Fee Configuration (%)</div>
                 <div className="space-y-3">
                   {[
-                    { label: 'Spot Trading Fee', key: 'spot' as keyof typeof fees },
-                    { label: 'Withdrawal Fee', key: 'withdrawal' as keyof typeof fees },
-                    { label: 'Staking Platform Fee', key: 'staking' as keyof typeof fees },
+                    { label: 'Spot Trading Fee', key: 'spotFeePct' as const },
+                    { label: 'Withdrawal Fee', key: 'withdrawalFeePct' as const },
+                    { label: 'Staking Platform Fee', key: 'stakingFeePct' as const },
                   ].map(f => (
                     <div key={f.key}>
                       <label style={{ fontSize: 12, color: '#5A7A9C', display: 'block', marginBottom: 4 }}>{f.label}</label>
                       <div className="flex items-center gap-2">
-                        <input type="number" step="0.01" value={fees[f.key]}
-                          onChange={e => setFees(prev => ({ ...prev, [f.key]: e.target.value }))}
+                        <input type="number" step="0.01" value={settings[f.key]}
+                          onChange={e => setSettings({ ...settings, [f.key]: Number(e.target.value) })}
                           className="flex-1 px-3 py-2.5 rounded-xl outline-none"
                           style={{ background: '#0D1E35', border: '1px solid rgba(0,212,255,0.1)', color: '#E8F0FE', fontSize: 14, fontFamily: 'var(--font-mono)' }}
                           onFocus={e => e.target.style.borderColor = 'rgba(0,212,255,0.3)'}
@@ -722,9 +716,9 @@ export function AdminPage() {
                       </div>
                     </div>
                   ))}
-                  <button className="w-full py-2.5 rounded-xl mt-2"
-                    style={{ background: 'linear-gradient(135deg, #00D4FF, #0066FF)', color: '#050B14', fontWeight: 700, fontSize: 13 }}>
-                    Save Fee Settings
+                  <button onClick={handleSaveSettings} disabled={savingSettings} className="w-full py-2.5 rounded-xl mt-2"
+                    style={{ background: 'linear-gradient(135deg, #00D4FF, #0066FF)', color: '#050B14', fontWeight: 700, fontSize: 13, opacity: savingSettings ? 0.7 : 1 }}>
+                    {savingSettings ? 'Saving…' : 'Save Fee Settings'}
                   </button>
                 </div>
               </div>
@@ -734,45 +728,24 @@ export function AdminPage() {
                 <div style={{ fontSize: 14, fontWeight: 700, color: '#E8F0FE', marginBottom: 14 }}>Withdrawal Limits (USD)</div>
                 <div className="space-y-3">
                   {[
-                    { label: 'Daily Withdrawal Limit', key: 'dailyWithdraw' as keyof typeof limits },
-                    { label: 'KYC Level 1 Limit', key: 'kycLevel1' as keyof typeof limits },
-                    { label: 'KYC Level 2 Limit', key: 'kycLevel2' as keyof typeof limits },
+                    { label: 'Daily Withdrawal Limit', key: 'dailyWithdrawLimit' as const },
+                    { label: 'KYC Level 1 Limit', key: 'kycLevel1Limit' as const },
+                    { label: 'KYC Level 2 Limit', key: 'kycLevel2Limit' as const },
                   ].map(l => (
                     <div key={l.key}>
                       <label style={{ fontSize: 12, color: '#5A7A9C', display: 'block', marginBottom: 4 }}>{l.label}</label>
-                      <input type="number" value={limits[l.key]}
-                        onChange={e => setLimits(prev => ({ ...prev, [l.key]: e.target.value }))}
+                      <input type="number" value={settings[l.key]}
+                        onChange={e => setSettings({ ...settings, [l.key]: Number(e.target.value) })}
                         className="w-full px-3 py-2.5 rounded-xl outline-none"
                         style={{ background: '#0D1E35', border: '1px solid rgba(0,212,255,0.1)', color: '#E8F0FE', fontSize: 14, fontFamily: 'var(--font-mono)' }}
                         onFocus={e => e.target.style.borderColor = 'rgba(0,212,255,0.3)'}
                         onBlur={e => e.target.style.borderColor = 'rgba(0,212,255,0.1)'} />
                     </div>
                   ))}
-                  <button className="w-full py-2.5 rounded-xl mt-2"
-                    style={{ background: 'linear-gradient(135deg, #00D4FF, #0066FF)', color: '#050B14', fontWeight: 700, fontSize: 13 }}>
-                    Save Limit Settings
+                  <button onClick={handleSaveSettings} disabled={savingSettings} className="w-full py-2.5 rounded-xl mt-2"
+                    style={{ background: 'linear-gradient(135deg, #00D4FF, #0066FF)', color: '#050B14', fontWeight: 700, fontSize: 13, opacity: savingSettings ? 0.7 : 1 }}>
+                    {savingSettings ? 'Saving…' : 'Save Limit Settings'}
                   </button>
-                </div>
-              </div>
-
-              {/* Danger zone */}
-              <div className="lg:col-span-2 p-5 rounded-2xl" style={{ background: '#0A1628', border: '1px solid rgba(255,59,92,0.15)' }}>
-                <div style={{ fontSize: 14, fontWeight: 700, color: '#FF3B5C', marginBottom: 12 }}>⚠ Danger Zone</div>
-                <div className="grid sm:grid-cols-3 gap-3">
-                  {[
-                    { label: 'Enable Maintenance Mode', desc: 'Blocks all user logins temporarily' },
-                    { label: 'Freeze All Withdrawals', desc: 'Emergency halt on all outflows' },
-                    { label: 'Force KYC Re-verification', desc: 'Require all users to re-verify' },
-                  ].map((action, i) => (
-                    <div key={i} className="p-3 rounded-xl" style={{ background: 'rgba(255,59,92,0.04)', border: '1px solid rgba(255,59,92,0.1)' }}>
-                      <div style={{ fontSize: 13, fontWeight: 600, color: '#E8F0FE', marginBottom: 3 }}>{action.label}</div>
-                      <div style={{ fontSize: 11, color: '#5A7A9C', marginBottom: 8 }}>{action.desc}</div>
-                      <button className="w-full py-1.5 rounded-lg"
-                        style={{ background: 'rgba(255,59,92,0.12)', color: '#FF3B5C', fontSize: 12, fontWeight: 700, border: '1px solid rgba(255,59,92,0.2)' }}>
-                        Execute
-                      </button>
-                    </div>
-                  ))}
                 </div>
               </div>
             </div>
@@ -801,7 +774,7 @@ export function AdminPage() {
               </div>
               <div>
                 <div style={{ fontSize: 15, fontWeight: 800, color: '#E8F0FE' }}>Edit balance</div>
-                <div style={{ fontSize: 12, color: '#5A7A9C' }}>{editUser.name} · {editUser.id}</div>
+                <div style={{ fontSize: 12, color: '#5A7A9C' }}>{editUser.firstName} {editUser.lastName}</div>
               </div>
             </div>
             <div style={{ fontSize: 11, color: '#5A7A9C', margin: '14px 0 6px', textTransform: 'uppercase', letterSpacing: 0.5 }}>

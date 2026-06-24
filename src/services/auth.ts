@@ -9,6 +9,7 @@ export interface AuthUser {
   kycStatus: 'pending' | 'verified' | 'rejected';
   twoFaEnabled: boolean;
   avatarUrl: string | null;
+  isAdmin: boolean;
 }
 
 // ── Mock fallback ─────────────────────────────────────────────────────────────
@@ -22,6 +23,7 @@ const MOCK_USER: AuthUser = {
   kycStatus: 'verified',
   twoFaEnabled: true,
   avatarUrl: 'https://i.pravatar.cc/40?img=12',
+  isAdmin: false,
 };
 
 let _mockSession: AuthUser | null = null;
@@ -104,9 +106,18 @@ export async function getSession(): Promise<AuthUser | null> {
   return fetchProfile(data.session.user.id);
 }
 
-export async function updateProfile(userId: string, updates: { firstName?: string; lastName?: string; plan?: AuthUser['plan'] }): Promise<void> {
+export async function updateProfile(
+  userId: string,
+  updates: { firstName?: string; lastName?: string; plan?: AuthUser['plan']; twoFaEnabled?: boolean },
+): Promise<void> {
   if (!isSupabaseConfigured || !supabase) {
-    if (_mockSession) Object.assign(_mockSession, { firstName: updates.firstName ?? _mockSession.firstName, lastName: updates.lastName ?? _mockSession.lastName });
+    if (_mockSession) {
+      Object.assign(_mockSession, {
+        firstName: updates.firstName ?? _mockSession.firstName,
+        lastName: updates.lastName ?? _mockSession.lastName,
+        twoFaEnabled: updates.twoFaEnabled ?? _mockSession.twoFaEnabled,
+      });
+    }
     return;
   }
 
@@ -114,7 +125,17 @@ export async function updateProfile(userId: string, updates: { firstName?: strin
     first_name: updates.firstName,
     last_name: updates.lastName,
     plan: updates.plan,
+    two_fa_enabled: updates.twoFaEnabled,
   }).eq('id', userId);
+  if (error) throw new Error(error.message);
+}
+
+export async function changePassword(newPassword: string): Promise<void> {
+  if (!isSupabaseConfigured || !supabase) {
+    await delay(400);
+    return;
+  }
+  const { error } = await supabase.auth.updateUser({ password: newPassword });
   if (error) throw new Error(error.message);
 }
 
@@ -133,6 +154,7 @@ async function fetchProfile(userId: string): Promise<AuthUser> {
     kycStatus: data.kyc_status,
     twoFaEnabled: data.two_fa_enabled,
     avatarUrl: data.avatar_url,
+    isAdmin: data.is_admin,
   };
 }
 

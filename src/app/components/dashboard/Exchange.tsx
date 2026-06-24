@@ -1,16 +1,11 @@
-import { useState } from 'react';
-import { ArrowUpDown, ChevronDown, Info } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { ArrowUpDown, ChevronDown } from 'lucide-react';
 import { useLang } from '../../i18n/LangContext';
+import { useAuth } from '../../context/AuthContext';
 import { LineChart, Line, ResponsiveContainer, Tooltip, XAxis } from 'recharts';
-
-const COINS = [
-  { symbol: 'BTC', name: 'Bitcoin', price: 67842.50, color: '#F7931A' },
-  { symbol: 'ETH', name: 'Ethereum', price: 3521.18, color: '#627EEA' },
-  { symbol: 'SOL', name: 'Solana', price: 182.40, color: '#9945FF' },
-  { symbol: 'BNB', name: 'BNB', price: 612.33, color: '#F0B90B' },
-  { symbol: 'USDT', name: 'Tether', price: 1.00, color: '#26A17B' },
-  { symbol: 'USDC', name: 'USD Coin', price: 1.00, color: '#2775CA' },
-];
+import { getMarketPrices, type MarketPrice } from '../../../services/market';
+import { swapAssets } from '../../../services/exchange';
+import { getPortfolio, type WalletBalance } from '../../../services/portfolio';
 
 const chartData = [
   { t: '00:00', p: 67100 }, { t: '04:00', p: 67450 }, { t: '08:00', p: 66900 },
@@ -19,20 +14,60 @@ const chartData = [
 
 export function Exchange() {
   const { t } = useLang();
+  const { user } = useAuth();
   const d = t.dashboard.exchange;
-  const [fromCoin, setFromCoin] = useState(COINS[4]); // USDT
-  const [toCoin, setToCoin] = useState(COINS[0]); // BTC
+  const [coins, setCoins] = useState<MarketPrice[]>([]);
+  const [wallets, setWallets] = useState<WalletBalance[]>([]);
+  const [fromCoin, setFromCoin] = useState<MarketPrice | null>(null);
+  const [toCoin, setToCoin] = useState<MarketPrice | null>(null);
   const [fromAmount, setFromAmount] = useState('1000');
   const [showFromList, setShowFromList] = useState(false);
   const [showToList, setShowToList] = useState(false);
+  const [swapping, setSwapping] = useState(false);
+  const [swapError, setSwapError] = useState('');
+  const [swapDone, setSwapDone] = useState(false);
 
-  const toAmount = fromCoin.price / toCoin.price * parseFloat(fromAmount || '0');
+  const refresh = () => {
+    Promise.all([getMarketPrices(), getPortfolio(user?.id ?? 'guest')]).then(([prices, portfolio]) => {
+      setCoins(prices);
+      setWallets(portfolio.wallets);
+      setFromCoin(prev => prev ?? prices.find(c => c.symbol === 'USDT') ?? prices[0]);
+      setToCoin(prev => prev ?? prices.find(c => c.symbol === 'BTC') ?? prices[1]);
+    });
+  };
+
+  useEffect(refresh, [user?.id]);
+
+  if (!fromCoin || !toCoin) {
+    return <div style={{ color: '#5A7A9C', fontSize: 13 }}>Loading markets…</div>;
+  }
+
+  const fromBalance = wallets.find(w => w.symbol === fromCoin.symbol)?.balance ?? 0;
+  const toAmount = (fromCoin.price / toCoin.price) * parseFloat(fromAmount || '0');
   const fee = parseFloat(fromAmount || '0') * 0.003;
 
   const handleFlip = () => {
     const tmp = fromCoin;
     setFromCoin(toCoin);
     setToCoin(tmp);
+  };
+
+  const handleSwap = async () => {
+    const amount = parseFloat(fromAmount);
+    if (!amount || amount <= 0) { setSwapError('Enter a valid amount.'); return; }
+    if (amount > fromBalance) { setSwapError('Insufficient balance.'); return; }
+    setSwapError('');
+    setSwapDone(false);
+    setSwapping(true);
+    try {
+      await swapAssets(fromCoin.symbol, toCoin.symbol, amount);
+      setSwapDone(true);
+      refresh();
+    } catch (err: unknown) {
+      setSwapError(err instanceof Error ? err.message : 'Swap failed.');
+    } finally {
+      setSwapping(false);
+    }
   };
 
   return (
@@ -58,8 +93,8 @@ export function Exchange() {
                     <ChevronDown size={12} style={{ color: '#5A7A9C' }} />
                   </button>
                   {showFromList && (
-                    <div className="absolute top-full left-0 mt-1 z-20 rounded-xl overflow-hidden" style={{ background: '#112240', border: '1px solid rgba(0,212,255,0.15)', minWidth: 160 }}>
-                      {COINS.map(c => (
+                    <div className="absolute top-full left-0 mt-1 z-20 rounded-xl overflow-hidden" style={{ background: '#112240', border: '1px solid rgba(0,212,255,0.15)', minWidth: 160, maxHeight: 260, overflowY: 'auto' }}>
+                      {coins.map(c => (
                         <button key={c.symbol} onClick={() => { setFromCoin(c); setShowFromList(false); }}
                           className="w-full flex items-center gap-2 px-3 py-2 transition-colors"
                           style={{ color: '#E8F0FE', fontSize: 13 }}
@@ -83,7 +118,7 @@ export function Exchange() {
                 />
               </div>
               <div className="flex justify-between" style={{ fontSize: 11, color: '#5A7A9C' }}>
-                <span>Balance: 5,000.00 USDT</span>
+                <span>Balance: {fromBalance.toLocaleString('en', { maximumFractionDigits: 6 })} {fromCoin.symbol}</span>
                 <span>${(parseFloat(fromAmount || '0') * fromCoin.price).toLocaleString('en', { maximumFractionDigits: 2 })}</span>
               </div>
             </div>
@@ -118,8 +153,8 @@ export function Exchange() {
                     <ChevronDown size={12} style={{ color: '#5A7A9C' }} />
                   </button>
                   {showToList && (
-                    <div className="absolute top-full left-0 mt-1 z-20 rounded-xl overflow-hidden" style={{ background: '#112240', border: '1px solid rgba(0,212,255,0.15)', minWidth: 160 }}>
-                      {COINS.map(c => (
+                    <div className="absolute top-full left-0 mt-1 z-20 rounded-xl overflow-hidden" style={{ background: '#112240', border: '1px solid rgba(0,212,255,0.15)', minWidth: 160, maxHeight: 260, overflowY: 'auto' }}>
+                      {coins.map(c => (
                         <button key={c.symbol} onClick={() => { setToCoin(c); setShowToList(false); }}
                           className="w-full flex items-center gap-2 px-3 py-2 transition-colors"
                           style={{ color: '#E8F0FE', fontSize: 13 }}
@@ -161,13 +196,18 @@ export function Exchange() {
             ))}
           </div>
 
+          {swapError && <p style={{ fontSize: 12, color: '#FF3B5C', marginBottom: 8 }}>{swapError}</p>}
+          {swapDone && <p style={{ fontSize: 12, color: '#00C896', marginBottom: 8 }}>Swap completed.</p>}
+
           <button
+            onClick={handleSwap}
+            disabled={swapping}
             className="w-full py-3.5 rounded-xl transition-all duration-200"
-            style={{ background: 'linear-gradient(135deg, #00D4FF, #0066FF)', color: '#050B14', fontWeight: 700, fontSize: 14, boxShadow: '0 0 20px rgba(0,212,255,0.25)' }}
+            style={{ background: 'linear-gradient(135deg, #00D4FF, #0066FF)', color: '#050B14', fontWeight: 700, fontSize: 14, boxShadow: '0 0 20px rgba(0,212,255,0.25)', opacity: swapping ? 0.7 : 1 }}
             onMouseEnter={e => e.currentTarget.style.boxShadow = '0 0 40px rgba(0,212,255,0.4)'}
             onMouseLeave={e => e.currentTarget.style.boxShadow = '0 0 20px rgba(0,212,255,0.25)'}
           >
-            {d.swap}
+            {swapping ? 'Swapping…' : d.swap}
           </button>
         </div>
       </div>
@@ -183,7 +223,9 @@ export function Exchange() {
                 ${toCoin.price.toLocaleString()}
               </div>
             </div>
-            <span style={{ fontSize: 13, color: '#00C896', fontFamily: 'var(--font-mono)' }}>+2.43% 24h</span>
+            <span style={{ fontSize: 13, color: toCoin.change24h >= 0 ? '#00C896' : '#FF3B5C', fontFamily: 'var(--font-mono)' }}>
+              {toCoin.change24h >= 0 ? '+' : ''}{toCoin.change24h.toFixed(2)}% 24h
+            </span>
           </div>
           <div className="h-36">
             <ResponsiveContainer width="100%" height="100%">
@@ -202,31 +244,29 @@ export function Exchange() {
           <div className="grid grid-cols-2 gap-4">
             <div>
               <div style={{ fontSize: 11, color: '#5A7A9C', marginBottom: 6, display: 'flex', justifyContent: 'space-between' }}>
-                <span>Price (USDT)</span><span>Size (BTC)</span>
+                <span>Price (USDT)</span><span>Size ({toCoin.symbol})</span>
               </div>
-              {[
-                ['67,812.00', '0.4821'], ['67,808.50', '1.2340'], ['67,801.00', '0.8910'],
-                ['67,795.20', '2.1500'], ['67,790.80', '0.3350'],
-              ].map(([price, size], i) => (
+              {[0, 1, 2, 3, 4].map(i => (
                 <div key={i} className="flex justify-between py-0.5 relative">
                   <div className="absolute inset-0 rounded" style={{ background: '#FF3B5C0A', width: `${30 + i * 12}%` }} />
-                  <span style={{ fontSize: 12, color: '#FF3B5C', fontFamily: 'var(--font-mono)', position: 'relative' }}>{price}</span>
-                  <span style={{ fontSize: 12, color: '#8AA8C4', fontFamily: 'var(--font-mono)', position: 'relative' }}>{size}</span>
+                  <span style={{ fontSize: 12, color: '#FF3B5C', fontFamily: 'var(--font-mono)', position: 'relative' }}>
+                    {(toCoin.price * (1 + (i + 1) * 0.0003)).toLocaleString('en', { maximumFractionDigits: 2 })}
+                  </span>
+                  <span style={{ fontSize: 12, color: '#8AA8C4', fontFamily: 'var(--font-mono)', position: 'relative' }}>{(0.3 + i * 0.4).toFixed(4)}</span>
                 </div>
               ))}
             </div>
             <div>
               <div style={{ fontSize: 11, color: '#5A7A9C', marginBottom: 6, display: 'flex', justifyContent: 'space-between' }}>
-                <span>Price (USDT)</span><span>Size (BTC)</span>
+                <span>Price (USDT)</span><span>Size ({toCoin.symbol})</span>
               </div>
-              {[
-                ['67,842.50', '0.8200'], ['67,848.00', '0.5610'], ['67,852.30', '1.9820'],
-                ['67,860.00', '0.4430'], ['67,864.50', '3.2100'],
-              ].map(([price, size], i) => (
+              {[0, 1, 2, 3, 4].map(i => (
                 <div key={i} className="flex justify-between py-0.5 relative">
                   <div className="absolute inset-0 rounded" style={{ background: '#00C8960A', width: `${25 + i * 10}%` }} />
-                  <span style={{ fontSize: 12, color: '#00C896', fontFamily: 'var(--font-mono)', position: 'relative' }}>{price}</span>
-                  <span style={{ fontSize: 12, color: '#8AA8C4', fontFamily: 'var(--font-mono)', position: 'relative' }}>{size}</span>
+                  <span style={{ fontSize: 12, color: '#00C896', fontFamily: 'var(--font-mono)', position: 'relative' }}>
+                    {(toCoin.price * (1 - (i + 1) * 0.0003)).toLocaleString('en', { maximumFractionDigits: 2 })}
+                  </span>
+                  <span style={{ fontSize: 12, color: '#8AA8C4', fontFamily: 'var(--font-mono)', position: 'relative' }}>{(0.4 + i * 0.5).toFixed(4)}</span>
                 </div>
               ))}
             </div>

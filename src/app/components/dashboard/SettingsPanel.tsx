@@ -1,24 +1,82 @@
 import { useState } from 'react';
 import { User, Shield, Bell, CheckCircle, ChevronRight, Camera } from 'lucide-react';
 import { useLang } from '../../i18n/LangContext';
+import { useAuth } from '../../context/AuthContext';
+import { updateProfile, changePassword } from '../../../services/auth';
+
+const KYC_LABEL: Record<string, string> = { verified: 'Verified', pending: 'Pending review', rejected: 'Rejected' };
+const KYC_COLOR: Record<string, string> = { verified: '#00C896', pending: '#F0B429', rejected: '#FF3B5C' };
 
 export function SettingsPanel() {
   const { t } = useLang();
+  const { user, setUser } = useAuth();
   const d = t.dashboard.settings;
   const [activeTab, setActiveTab] = useState<'profile' | 'security' | 'notifications'>('profile');
-  const [twoFa, setTwoFa] = useState(true);
   const [emailNotif, setEmailNotif] = useState(true);
   const [pushNotif, setPushNotif] = useState(true);
   const [priceAlerts, setPriceAlerts] = useState(false);
-  const [name, setName] = useState('Alex Volkov');
-  const [email, setEmail] = useState('alex.volkov@gmail.com');
-  const [phone, setPhone] = useState('+7 999 123-45-67');
+  const [firstName, setFirstName] = useState(user?.firstName ?? '');
+  const [lastName, setLastName] = useState(user?.lastName ?? '');
+  const [saving, setSaving] = useState(false);
+  const [saveMsg, setSaveMsg] = useState('');
+
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [pwError, setPwError] = useState('');
+  const [pwSaving, setPwSaving] = useState(false);
+  const [pwSaved, setPwSaved] = useState(false);
+  const [twoFaSaving, setTwoFaSaving] = useState(false);
 
   const tabs = [
     { id: 'profile' as const, label: d.profile, icon: User },
     { id: 'security' as const, label: d.security, icon: Shield },
     { id: 'notifications' as const, label: d.notifications, icon: Bell },
   ];
+
+  if (!user) return null;
+
+  const handleSaveProfile = async () => {
+    setSaving(true);
+    setSaveMsg('');
+    try {
+      await updateProfile(user.id, { firstName, lastName });
+      setUser({ ...user, firstName, lastName });
+      setSaveMsg('Saved.');
+    } catch (err: unknown) {
+      setSaveMsg(err instanceof Error ? err.message : 'Failed to save.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleToggle2fa = async () => {
+    setTwoFaSaving(true);
+    try {
+      const next = !user.twoFaEnabled;
+      await updateProfile(user.id, { twoFaEnabled: next });
+      setUser({ ...user, twoFaEnabled: next });
+    } finally {
+      setTwoFaSaving(false);
+    }
+  };
+
+  const handleChangePassword = async () => {
+    if (newPassword.length < 8) { setPwError('Password must be at least 8 characters.'); return; }
+    if (newPassword !== confirmPassword) { setPwError('Passwords do not match.'); return; }
+    setPwError('');
+    setPwSaving(true);
+    setPwSaved(false);
+    try {
+      await changePassword(newPassword);
+      setPwSaved(true);
+      setNewPassword('');
+      setConfirmPassword('');
+    } catch (err: unknown) {
+      setPwError(err instanceof Error ? err.message : 'Failed to update password.');
+    } finally {
+      setPwSaving(false);
+    }
+  };
 
   return (
     <div className="grid lg:grid-cols-4 gap-5">
@@ -54,7 +112,7 @@ export function SettingsPanel() {
               <div style={{ fontSize: 15, fontWeight: 700, color: '#E8F0FE', marginBottom: 8 }}>{d.profile}</div>
               <div className="flex items-center gap-4 mb-6">
                 <div className="relative">
-                  <img src="https://i.pravatar.cc/80?img=12" alt="Avatar" className="w-16 h-16 rounded-full" style={{ border: '2px solid rgba(0,212,255,0.25)' }} />
+                  <img src={user.avatarUrl ?? `https://api.dicebear.com/7.x/identicon/svg?seed=${encodeURIComponent(user.firstName + user.lastName)}`} alt="Avatar" className="w-16 h-16 rounded-full" style={{ border: '2px solid rgba(0,212,255,0.25)' }} />
                   <button
                     className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full flex items-center justify-center"
                     style={{ background: '#00D4FF' }}
@@ -63,53 +121,69 @@ export function SettingsPanel() {
                   </button>
                 </div>
                 <div>
-                  <div style={{ fontSize: 15, fontWeight: 700, color: '#E8F0FE' }}>{name}</div>
+                  <div style={{ fontSize: 15, fontWeight: 700, color: '#E8F0FE' }}>{firstName} {lastName}</div>
                   <div className="inline-flex px-2 py-0.5 rounded mt-1" style={{ background: 'rgba(0,212,255,0.08)', fontSize: 12, color: '#00D4FF' }}>
-                    Pro Account
+                    {user.plan.charAt(0).toUpperCase() + user.plan.slice(1)} Account
                   </div>
                 </div>
               </div>
 
               {/* KYC */}
-              <div className="flex items-center justify-between p-4 rounded-xl" style={{ background: 'rgba(0,200,150,0.06)', border: '1px solid rgba(0,200,150,0.15)' }}>
+              <div className="flex items-center justify-between p-4 rounded-xl" style={{ background: KYC_COLOR[user.kycStatus] + '0F', border: `1px solid ${KYC_COLOR[user.kycStatus]}26` }}>
                 <div className="flex items-center gap-3">
-                  <CheckCircle size={18} style={{ color: '#00C896' }} />
+                  <CheckCircle size={18} style={{ color: KYC_COLOR[user.kycStatus] }} />
                   <div>
                     <div style={{ fontSize: 13, fontWeight: 600, color: '#E8F0FE' }}>{d.kyc}</div>
-                    <div style={{ fontSize: 12, color: '#5A7A9C' }}>Level 2 verified · Submitted Jun 1, 2026</div>
+                    <div style={{ fontSize: 12, color: '#5A7A9C' }}>Identity verification status</div>
                   </div>
                 </div>
-                <span style={{ fontSize: 12, color: '#00C896', fontWeight: 600 }}>Verified</span>
+                <span style={{ fontSize: 12, color: KYC_COLOR[user.kycStatus], fontWeight: 600 }}>{KYC_LABEL[user.kycStatus]}</span>
               </div>
 
               {[
-                { label: 'Full Name', value: name, setter: setName },
-                { label: 'Email Address', value: email, setter: setEmail },
-                { label: 'Phone Number', value: phone, setter: setPhone },
+                { label: 'Full Name', kind: 'name' as const },
+                { label: 'Email Address', kind: 'email' as const },
               ].map(field => (
                 <div key={field.label}>
                   <label style={{ fontSize: 12, color: '#5A7A9C', display: 'block', marginBottom: 5 }}>{field.label}</label>
-                  <input
-                    value={field.value}
-                    onChange={e => field.setter(e.target.value)}
-                    className="w-full px-4 py-3 rounded-xl outline-none transition-all"
-                    style={{
-                      background: '#0D1E35',
-                      border: '1px solid rgba(0,212,255,0.1)',
-                      color: '#E8F0FE',
-                      fontSize: 14,
-                    }}
-                    onFocus={e => e.target.style.borderColor = 'rgba(0,212,255,0.35)'}
-                    onBlur={e => e.target.style.borderColor = 'rgba(0,212,255,0.1)'}
-                  />
+                  {field.kind === 'email' ? (
+                    <input
+                      value={user.email}
+                      disabled
+                      className="w-full px-4 py-3 rounded-xl outline-none transition-all"
+                      style={{ background: '#0D1E35', border: '1px solid rgba(0,212,255,0.1)', color: '#5A7A9C', fontSize: 14, opacity: 0.7 }}
+                    />
+                  ) : (
+                    <div className="grid grid-cols-2 gap-3">
+                      <input
+                        value={firstName}
+                        onChange={e => setFirstName(e.target.value)}
+                        className="w-full px-4 py-3 rounded-xl outline-none transition-all"
+                        style={{ background: '#0D1E35', border: '1px solid rgba(0,212,255,0.1)', color: '#E8F0FE', fontSize: 14 }}
+                        onFocus={e => e.target.style.borderColor = 'rgba(0,212,255,0.35)'}
+                        onBlur={e => e.target.style.borderColor = 'rgba(0,212,255,0.1)'}
+                      />
+                      <input
+                        value={lastName}
+                        onChange={e => setLastName(e.target.value)}
+                        className="w-full px-4 py-3 rounded-xl outline-none transition-all"
+                        style={{ background: '#0D1E35', border: '1px solid rgba(0,212,255,0.1)', color: '#E8F0FE', fontSize: 14 }}
+                        onFocus={e => e.target.style.borderColor = 'rgba(0,212,255,0.35)'}
+                        onBlur={e => e.target.style.borderColor = 'rgba(0,212,255,0.1)'}
+                      />
+                    </div>
+                  )}
                 </div>
               ))}
 
+              {saveMsg && <p style={{ fontSize: 12, color: saveMsg === 'Saved.' ? '#00C896' : '#FF3B5C' }}>{saveMsg}</p>}
               <button
+                onClick={handleSaveProfile}
+                disabled={saving}
                 className="px-6 py-2.5 rounded-xl"
-                style={{ background: 'linear-gradient(135deg, #00D4FF, #0066FF)', color: '#050B14', fontWeight: 700, fontSize: 14 }}
+                style={{ background: 'linear-gradient(135deg, #00D4FF, #0066FF)', color: '#050B14', fontWeight: 700, fontSize: 14, opacity: saving ? 0.7 : 1 }}
               >
-                {d.save}
+                {saving ? 'Saving…' : d.save}
               </button>
             </div>
           )}
@@ -119,66 +193,50 @@ export function SettingsPanel() {
             <div className="space-y-4">
               <div style={{ fontSize: 15, fontWeight: 700, color: '#E8F0FE', marginBottom: 8 }}>{d.security}</div>
 
-              {[
-                {
-                  title: d.twoFactor,
-                  desc: 'Authenticator app (TOTP)',
-                  value: twoFa,
-                  setter: setTwoFa,
-                  recommended: true,
-                },
-              ].map(item => (
-                <div key={item.title} className="flex items-center justify-between p-4 rounded-xl" style={{ background: '#0D1E35', border: '1px solid rgba(0,212,255,0.08)' }}>
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span style={{ fontSize: 14, fontWeight: 600, color: '#E8F0FE' }}>{item.title}</span>
-                      {item.recommended && <span className="px-2 py-0.5 rounded" style={{ fontSize: 10, background: 'rgba(0,200,150,0.1)', color: '#00C896' }}>Recommended</span>}
-                    </div>
-                    <div style={{ fontSize: 12, color: '#5A7A9C', marginTop: 2 }}>{item.desc}</div>
+              <div className="flex items-center justify-between p-4 rounded-xl" style={{ background: '#0D1E35', border: '1px solid rgba(0,212,255,0.08)' }}>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span style={{ fontSize: 14, fontWeight: 600, color: '#E8F0FE' }}>{d.twoFactor}</span>
+                    <span className="px-2 py-0.5 rounded" style={{ fontSize: 10, background: 'rgba(0,200,150,0.1)', color: '#00C896' }}>Recommended</span>
                   </div>
-                  <button
-                    onClick={() => item.setter(!item.value)}
-                    className="relative w-12 h-6 rounded-full transition-all duration-300"
-                    style={{ background: item.value ? '#00D4FF' : 'rgba(255,255,255,0.1)' }}
-                  >
-                    <div
-                      className="absolute top-0.5 w-5 h-5 rounded-full transition-all duration-300"
-                      style={{ background: '#fff', left: item.value ? 'calc(100% - 22px)' : 2 }}
-                    />
-                  </button>
+                  <div style={{ fontSize: 12, color: '#5A7A9C', marginTop: 2 }}>Authenticator app (TOTP)</div>
                 </div>
-              ))}
+                <button
+                  onClick={handleToggle2fa}
+                  disabled={twoFaSaving}
+                  className="relative w-12 h-6 rounded-full transition-all duration-300"
+                  style={{ background: user.twoFaEnabled ? '#00D4FF' : 'rgba(255,255,255,0.1)', opacity: twoFaSaving ? 0.6 : 1 }}
+                >
+                  <div
+                    className="absolute top-0.5 w-5 h-5 rounded-full transition-all duration-300"
+                    style={{ background: '#fff', left: user.twoFaEnabled ? 'calc(100% - 22px)' : 2 }}
+                  />
+                </button>
+              </div>
 
               <div className="space-y-3">
-                <label style={{ fontSize: 12, color: '#5A7A9C' }}>Current Password</label>
-                <input type="password" placeholder="••••••••" className="w-full px-4 py-3 rounded-xl outline-none" style={{ background: '#0D1E35', border: '1px solid rgba(0,212,255,0.1)', color: '#E8F0FE', fontSize: 14 }} />
                 <label style={{ fontSize: 12, color: '#5A7A9C' }}>New Password</label>
-                <input type="password" placeholder="••••••••" className="w-full px-4 py-3 rounded-xl outline-none" style={{ background: '#0D1E35', border: '1px solid rgba(0,212,255,0.1)', color: '#E8F0FE', fontSize: 14 }} />
+                <input type="password" value={newPassword} onChange={e => setNewPassword(e.target.value)} placeholder="••••••••" className="w-full px-4 py-3 rounded-xl outline-none" style={{ background: '#0D1E35', border: '1px solid rgba(0,212,255,0.1)', color: '#E8F0FE', fontSize: 14 }} />
                 <label style={{ fontSize: 12, color: '#5A7A9C' }}>Confirm New Password</label>
-                <input type="password" placeholder="••••••••" className="w-full px-4 py-3 rounded-xl outline-none" style={{ background: '#0D1E35', border: '1px solid rgba(0,212,255,0.1)', color: '#E8F0FE', fontSize: 14 }} />
-                <button className="px-6 py-2.5 rounded-xl" style={{ background: 'linear-gradient(135deg, #00D4FF, #0066FF)', color: '#050B14', fontWeight: 700, fontSize: 14 }}>
-                  Update Password
+                <input type="password" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} placeholder="••••••••" className="w-full px-4 py-3 rounded-xl outline-none" style={{ background: '#0D1E35', border: '1px solid rgba(0,212,255,0.1)', color: '#E8F0FE', fontSize: 14 }} />
+                {pwError && <p style={{ fontSize: 12, color: '#FF3B5C' }}>{pwError}</p>}
+                {pwSaved && <p style={{ fontSize: 12, color: '#00C896' }}>Password updated.</p>}
+                <button onClick={handleChangePassword} disabled={pwSaving} className="px-6 py-2.5 rounded-xl" style={{ background: 'linear-gradient(135deg, #00D4FF, #0066FF)', color: '#050B14', fontWeight: 700, fontSize: 14, opacity: pwSaving ? 0.7 : 1 }}>
+                  {pwSaving ? 'Updating…' : 'Update Password'}
                 </button>
               </div>
 
               {/* Active sessions */}
               <div className="mt-4">
                 <div style={{ fontSize: 13, fontWeight: 600, color: '#E8F0FE', marginBottom: 8 }}>Active Sessions</div>
-                {[
-                  { device: 'Chrome on macOS', ip: '185.42.12.***', location: 'Moscow, RU', current: true },
-                  { device: 'Safari on iPhone', ip: '91.108.56.***', location: 'Saint-P, RU', current: false },
-                ].map((s, i) => (
-                  <div key={i} className="flex items-center justify-between p-3 rounded-xl mb-2" style={{ background: '#0D1E35', border: '1px solid rgba(0,212,255,0.06)' }}>
-                    <div>
-                      <div style={{ fontSize: 13, color: '#E8F0FE', fontWeight: 500 }}>{s.device}</div>
-                      <div style={{ fontSize: 11, color: '#5A7A9C' }}>{s.ip} · {s.location}</div>
-                    </div>
-                    {s.current
-                      ? <span style={{ fontSize: 11, color: '#00C896' }}>Current</span>
-                      : <button style={{ fontSize: 11, color: '#FF3B5C' }}>Revoke</button>
-                    }
+                <div className="flex items-center justify-between p-3 rounded-xl mb-2" style={{ background: '#0D1E35', border: '1px solid rgba(0,212,255,0.06)' }}>
+                  <div>
+                    <div style={{ fontSize: 13, color: '#E8F0FE', fontWeight: 500 }}>This device</div>
+                    <div style={{ fontSize: 11, color: '#5A7A9C' }}>{navigator.userAgent.split(') ')[0].split(' (')[1] ?? navigator.platform}</div>
                   </div>
-                ))}
+                  <span style={{ fontSize: 11, color: '#00C896' }}>Current</span>
+                </div>
+                <p style={{ fontSize: 11, color: '#3A5A7C' }}>Other-device session tracking requires a server-side admin key and isn't available from the browser.</p>
               </div>
             </div>
           )}

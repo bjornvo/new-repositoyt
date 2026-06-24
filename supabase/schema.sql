@@ -14,17 +14,49 @@ create table if not exists public.profiles (
   kyc_status    text not null default 'pending' check (kyc_status in ('pending', 'verified', 'rejected')),
   two_fa_enabled boolean not null default false,
   avatar_url    text,
+  is_admin      boolean not null default false,
+  is_suspended  boolean not null default false,
   created_at    timestamptz not null default now(),
   updated_at    timestamptz not null default now()
 );
 
+alter table public.profiles add column if not exists is_admin boolean not null default false;
+alter table public.profiles add column if not exists is_suspended boolean not null default false;
+
 alter table public.profiles enable row level security;
 
+drop policy if exists "Users can read own profile" on public.profiles;
 create policy "Users can read own profile"
   on public.profiles for select using (auth.uid() = id);
 
+drop policy if exists "Users can update own profile" on public.profiles;
 create policy "Users can update own profile"
   on public.profiles for update using (auth.uid() = id);
+
+-- ── Admin helper ─────────────────────────────────────────────────────────────
+-- security definer + fixed search_path: lets RLS policies check "is this caller
+-- an admin?" without being blocked by the (intentionally) row-scoped policies
+-- on public.profiles above (a normal SELECT under RLS could only ever see the
+-- caller's own row, which would make this function useless inside other
+-- tables' policies).
+create or replace function public.is_admin()
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select coalesce((select is_admin from public.profiles where id = auth.uid()), false);
+$$;
+
+-- Admins can read / moderate every profile (KYC review, user management, etc.)
+drop policy if exists "Admins can read all profiles" on public.profiles;
+create policy "Admins can read all profiles"
+  on public.profiles for select using (public.is_admin());
+
+drop policy if exists "Admins can update all profiles" on public.profiles;
+create policy "Admins can update all profiles"
+  on public.profiles for update using (public.is_admin());
 
 -- ── Wallets ───────────────────────────────────────────────────────────────────
 create table if not exists public.wallets (
@@ -40,8 +72,13 @@ create table if not exists public.wallets (
 
 alter table public.wallets enable row level security;
 
+drop policy if exists "Users can manage own wallets" on public.wallets;
 create policy "Users can manage own wallets"
   on public.wallets for all using (auth.uid() = user_id);
+
+drop policy if exists "Admins can manage all wallets" on public.wallets;
+create policy "Admins can manage all wallets"
+  on public.wallets for all using (public.is_admin());
 
 -- ── Transactions ──────────────────────────────────────────────────────────────
 create table if not exists public.transactions (
@@ -61,11 +98,17 @@ create table if not exists public.transactions (
 
 alter table public.transactions enable row level security;
 
+drop policy if exists "Users can read own transactions" on public.transactions;
 create policy "Users can read own transactions"
   on public.transactions for select using (auth.uid() = user_id);
 
+drop policy if exists "Users can insert own transactions" on public.transactions;
 create policy "Users can insert own transactions"
   on public.transactions for insert with check (auth.uid() = user_id);
+
+drop policy if exists "Admins can read all transactions" on public.transactions;
+create policy "Admins can read all transactions"
+  on public.transactions for select using (public.is_admin());
 
 -- ── Stakes ────────────────────────────────────────────────────────────────────
 create table if not exists public.stakes (
@@ -84,10 +127,129 @@ create table if not exists public.stakes (
 
 alter table public.stakes enable row level security;
 
+drop policy if exists "Users can manage own stakes" on public.stakes;
 create policy "Users can manage own stakes"
   on public.stakes for all using (auth.uid() = user_id);
 
--- ── Updated_at trigger ────────────────────────────────────────────────────────
+drop policy if exists "Admins can read all stakes" on public.stakes;
+create policy "Admins can read all stakes"
+  on public.stakes for select using (public.is_admin());
+
+-- ── Cards ─────────────────────────────────────────────────────────────────────
+-- Fictitious sandbox card data only (this product never touches a real card
+-- network), so storing the demo PAN/CVV in plain columns is fine — there is no
+-- real cardholder data here to protect.
+create table if not exists public.cards (
+  id          uuid primary key default uuid_generate_v4(),
+  user_id     uuid not null references public.profiles(id) on delete cascade,
+  type        text not null check (type in ('virtual', 'physical')),
+  number      text not null,
+  expiry      text not null,
+  cvv         text not null,
+  holder_name text not null,
+  balance     numeric(18, 2) not null default 0,
+  spent       numeric(18, 2) not null default 0,
+  card_limit  numeric(18, 2) not null default 5000,
+  frozen      boolean not null default false,
+  created_at  timestamptz not null default now()
+);
+
+alter table public.cards enable row level security;
+
+drop policy if exists "Users can manage own cards" on public.cards;
+create policy "Users can manage own cards"
+  on public.cards for all using (auth.uid() = user_id);
+
+drop policy if exists "Admins can read all cards" on public.cards;
+create policy "Admins can read all cards"
+  on public.cards for select using (public.is_admin());
+
+-- ── Market prices ─────────────────────────────────────────────────────────────
+-- Stand-in for a live price feed. Exchange/Portfolio/Ticker read from here so
+-- the whole app shares one consistent set of prices; admins can edit them from
+-- Platform Settings without a deploy.
+create table if not exists public.market_prices (
+  symbol      text primary key,
+  name        text not null,
+  price       numeric(18, 8) not null,
+  change_24h  numeric(6, 2) not null default 0,
+  color       text not null default '#00D4FF',
+  updated_at  timestamptz not null default now()
+);
+
+alter table public.market_prices enable row level security;
+
+drop policy if exists "Anyone can read market prices" on public.market_prices;
+create policy "Anyone can read market prices"
+  on public.market_prices for select using (true);
+
+drop policy if exists "Admins can manage market prices" on public.market_prices;
+create policy "Admins can manage market prices"
+  on public.market_prices for all using (public.is_admin());
+
+insert into public.market_prices (symbol, name, price, change_24h, color) values
+  ('BTC',  'Bitcoin',     67842.50, 2.43,  '#F7931A'),
+  ('ETH',  'Ethereum',     3521.18, 1.82,  '#627EEA'),
+  ('SOL',  'Solana',        182.40, 5.21,  '#9945FF'),
+  ('BNB',  'BNB Chain',     612.33, -0.87, '#F0B90B'),
+  ('MATIC','Polygon',         0.8921, 2.18,'#8247E5'),
+  ('USDT', 'Tether',          1.00, 0.01,  '#26A17B'),
+  ('USDC', 'USD Coin',        1.00, 0.00,  '#2775CA'),
+  ('XRP',  'XRP',             0.6241, 3.14,'#23292F'),
+  ('ADA',  'Cardano',         0.5831, -1.23,'#0033AD'),
+  ('AVAX', 'Avalanche',      42.87, 4.56,  '#E84142'),
+  ('DOT',  'Polkadot',        8.92, -0.34, '#E6007A'),
+  ('LINK', 'Chainlink',      18.43, 3.72,  '#2A5ADA'),
+  ('UNI',  'Uniswap',        12.64, -2.01, '#FF007A'),
+  ('ATOM', 'Cosmos',          9.78, 1.45,  '#2E3148')
+on conflict (symbol) do nothing;
+
+-- ── Announcements ─────────────────────────────────────────────────────────────
+create table if not exists public.announcements (
+  id          uuid primary key default uuid_generate_v4(),
+  title       text not null,
+  body        text not null,
+  type        text not null default 'info' check (type in ('info', 'warning', 'maintenance')),
+  active      boolean not null default true,
+  created_by  uuid references public.profiles(id) on delete set null,
+  created_at  timestamptz not null default now()
+);
+
+alter table public.announcements enable row level security;
+
+drop policy if exists "Anyone can read active announcements" on public.announcements;
+create policy "Anyone can read active announcements"
+  on public.announcements for select using (active = true or public.is_admin());
+
+drop policy if exists "Admins can manage announcements" on public.announcements;
+create policy "Admins can manage announcements"
+  on public.announcements for all using (public.is_admin());
+
+-- ── Admin settings (singleton row) ────────────────────────────────────────────
+create table if not exists public.admin_settings (
+  id                  smallint primary key default 1 check (id = 1),
+  spot_fee_pct        numeric(5, 2) not null default 0.30,
+  withdrawal_fee_pct  numeric(5, 2) not null default 0.50,
+  staking_fee_pct     numeric(5, 2) not null default 0.00,
+  daily_withdraw_limit numeric(18, 2) not null default 500000,
+  kyc_level1_limit    numeric(18, 2) not null default 10000,
+  kyc_level2_limit    numeric(18, 2) not null default 1000000,
+  updated_at          timestamptz not null default now()
+);
+
+alter table public.admin_settings enable row level security;
+
+drop policy if exists "Admins can read settings" on public.admin_settings;
+create policy "Admins can read settings"
+  on public.admin_settings for select using (public.is_admin());
+
+drop policy if exists "Admins can update settings" on public.admin_settings;
+create policy "Admins can update settings"
+  on public.admin_settings for update using (public.is_admin());
+
+insert into public.admin_settings (id) values (1) on conflict (id) do nothing;
+
+-- ── Updated_at triggers ───────────────────────────────────────────────────────
 create or replace function public.handle_updated_at()
 returns trigger language plpgsql as $$
 begin
@@ -96,8 +258,19 @@ begin
 end;
 $$;
 
+drop trigger if exists profiles_updated_at on public.profiles;
 create trigger profiles_updated_at
   before update on public.profiles
+  for each row execute function public.handle_updated_at();
+
+drop trigger if exists admin_settings_updated_at on public.admin_settings;
+create trigger admin_settings_updated_at
+  before update on public.admin_settings
+  for each row execute function public.handle_updated_at();
+
+drop trigger if exists market_prices_updated_at on public.market_prices;
+create trigger market_prices_updated_at
+  before update on public.market_prices
   for each row execute function public.handle_updated_at();
 
 -- ── Auto-create profile on signup ─────────────────────────────────────────────
@@ -115,6 +288,7 @@ begin
 end;
 $$;
 
+drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created
   after insert on auth.users
   for each row execute function public.handle_new_user();
@@ -123,3 +297,296 @@ create trigger on_auth_user_created
 create index if not exists transactions_user_id_created_at on public.transactions(user_id, created_at desc);
 create index if not exists wallets_user_id on public.wallets(user_id);
 create index if not exists stakes_user_id_status on public.stakes(user_id, status);
+create index if not exists cards_user_id on public.cards(user_id);
+create index if not exists announcements_active on public.announcements(active);
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- RPC functions — every balance-mutating action goes through one of these so
+-- the read-then-write is atomic (no lost updates from two tabs sending at once)
+-- and so the business rule (fee %, ownership check, sufficient balance) lives
+-- in one place instead of being re-implemented in every client call site.
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- Find (or lazily create) the caller's wallet for a symbol — used internally
+-- by swap/unstake/topup so credits always land somewhere.
+create or replace function public._get_or_create_wallet(p_user_id uuid, p_symbol text, p_chain text)
+returns public.wallets
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  w public.wallets;
+begin
+  select * into w from public.wallets where user_id = p_user_id and symbol = p_symbol limit 1;
+  if w.id is null then
+    insert into public.wallets (user_id, chain, symbol, address, balance, usd_value)
+    values (p_user_id, coalesce(p_chain, p_symbol), p_symbol, 'internal', 0, 0)
+    returning * into w;
+  end if;
+  return w;
+end;
+$$;
+
+-- Send funds out of one of the caller's wallets (simulates broadcasting to an
+-- external address — there is no counterpart credit since the recipient isn't
+-- necessarily a NovaCrypt user).
+create or replace function public.send_funds(p_wallet_id uuid, p_amount numeric, p_to_address text)
+returns public.transactions
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  w public.wallets;
+  price numeric;
+  fee_pct numeric;
+  fee_usd numeric;
+  usd_amount numeric;
+  tx public.transactions;
+begin
+  if p_amount is null or p_amount <= 0 then
+    raise exception 'Amount must be positive';
+  end if;
+
+  select * into w from public.wallets where id = p_wallet_id and user_id = auth.uid();
+  if w.id is null then
+    raise exception 'Wallet not found';
+  end if;
+  if w.balance < p_amount then
+    raise exception 'Insufficient balance';
+  end if;
+
+  select coalesce(price, 1) into price from public.market_prices where symbol = w.symbol;
+  select coalesce(withdrawal_fee_pct, 0.5) into fee_pct from public.admin_settings where id = 1;
+  usd_amount := p_amount * coalesce(price, 1);
+  fee_usd := usd_amount * coalesce(fee_pct, 0.5) / 100;
+
+  update public.wallets
+    set balance = balance - p_amount,
+        usd_value = greatest(usd_value - usd_amount, 0)
+    where id = w.id;
+
+  insert into public.transactions (user_id, type, asset, amount, usd_value, status, to_address, fee)
+  values (auth.uid(), 'send', w.symbol, p_amount, usd_amount, 'completed', p_to_address, fee_usd)
+  returning * into tx;
+
+  return tx;
+end;
+$$;
+
+-- Swap one asset for another at the current market_prices rate, minus the
+-- platform's spot fee.
+create or replace function public.swap_assets(p_from_symbol text, p_to_symbol text, p_from_amount numeric)
+returns public.transactions
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  from_w public.wallets;
+  to_w public.wallets;
+  price_from numeric;
+  price_to numeric;
+  fee_pct numeric;
+  fee_amount numeric;
+  net_amount numeric;
+  to_amount numeric;
+  usd_amount numeric;
+  tx public.transactions;
+begin
+  if p_from_amount is null or p_from_amount <= 0 then
+    raise exception 'Amount must be positive';
+  end if;
+  if p_from_symbol = p_to_symbol then
+    raise exception 'Cannot swap an asset into itself';
+  end if;
+
+  select price into price_from from public.market_prices where symbol = p_from_symbol;
+  select price into price_to from public.market_prices where symbol = p_to_symbol;
+  if price_from is null or price_to is null then
+    raise exception 'Unknown asset';
+  end if;
+
+  select * into from_w from public.wallets where user_id = auth.uid() and symbol = p_from_symbol limit 1;
+  if from_w.id is null or from_w.balance < p_from_amount then
+    raise exception 'Insufficient balance';
+  end if;
+
+  select coalesce(spot_fee_pct, 0.3) into fee_pct from public.admin_settings where id = 1;
+  fee_amount := p_from_amount * coalesce(fee_pct, 0.3) / 100;
+  net_amount := p_from_amount - fee_amount;
+  to_amount := net_amount * price_from / price_to;
+  usd_amount := p_from_amount * price_from;
+
+  update public.wallets
+    set balance = balance - p_from_amount,
+        usd_value = greatest(usd_value - usd_amount, 0)
+    where id = from_w.id;
+
+  to_w := public._get_or_create_wallet(auth.uid(), p_to_symbol, p_to_symbol);
+  update public.wallets
+    set balance = balance + to_amount,
+        usd_value = usd_value + (to_amount * price_to)
+    where id = to_w.id;
+
+  insert into public.transactions (user_id, type, asset, amount, usd_value, status, fee)
+  values (auth.uid(), 'swap', p_from_symbol || '→' || p_to_symbol, p_from_amount, usd_amount, 'completed', fee_amount * price_from)
+  returning * into tx;
+
+  return tx;
+end;
+$$;
+
+-- Open a stake: deducts the wallet now so the same balance can't be both
+-- "available" and "staked" at once.
+create or replace function public.create_stake(p_symbol text, p_amount numeric, p_apy numeric, p_lock_period_days integer)
+returns public.stakes
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  w public.wallets;
+  price numeric;
+  usd_amount numeric;
+  stake public.stakes;
+begin
+  if p_amount is null or p_amount <= 0 then
+    raise exception 'Amount must be positive';
+  end if;
+
+  select * into w from public.wallets where user_id = auth.uid() and symbol = p_symbol limit 1;
+  if w.id is null or w.balance < p_amount then
+    raise exception 'Insufficient balance';
+  end if;
+
+  select coalesce(price, 1) into price from public.market_prices where symbol = p_symbol;
+  usd_amount := p_amount * coalesce(price, 1);
+
+  update public.wallets
+    set balance = balance - p_amount,
+        usd_value = greatest(usd_value - usd_amount, 0)
+    where id = w.id;
+
+  insert into public.stakes (user_id, asset, amount, apy, status, lock_period_days, unlock_at)
+  values (
+    auth.uid(), p_symbol, p_amount, p_apy, 'active', p_lock_period_days,
+    case when p_lock_period_days > 0 then now() + (p_lock_period_days || ' days')::interval else null end
+  )
+  returning * into stake;
+
+  insert into public.transactions (user_id, type, asset, amount, usd_value, status, fee)
+  values (auth.uid(), 'stake', p_symbol, p_amount, usd_amount, 'completed', 0);
+
+  return stake;
+end;
+$$;
+
+-- Close a stake: credits principal + accrued rewards back to the wallet.
+create or replace function public.unstake_position(p_stake_id uuid)
+returns public.stakes
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  s public.stakes;
+  w public.wallets;
+  price numeric;
+  payout numeric;
+  usd_amount numeric;
+begin
+  select * into s from public.stakes where id = p_stake_id and user_id = auth.uid();
+  if s.id is null then
+    raise exception 'Stake not found';
+  end if;
+  if s.status = 'unstaked' then
+    raise exception 'Stake already closed';
+  end if;
+
+  payout := s.amount + s.earned;
+  select coalesce(price, 1) into price from public.market_prices where symbol = s.asset;
+  usd_amount := payout * coalesce(price, 1);
+
+  w := public._get_or_create_wallet(auth.uid(), s.asset, s.asset);
+  update public.wallets
+    set balance = balance + payout,
+        usd_value = usd_value + usd_amount
+    where id = w.id;
+
+  update public.stakes set status = 'unstaked', unlock_at = now() where id = s.id;
+
+  insert into public.transactions (user_id, type, asset, amount, usd_value, status, fee)
+  values (auth.uid(), 'unstake', s.asset, payout, usd_amount, 'completed', 0);
+
+  select * into s from public.stakes where id = p_stake_id;
+  return s;
+end;
+$$;
+
+-- Toggle freeze on one of the caller's cards.
+create or replace function public.toggle_card_freeze(p_card_id uuid)
+returns public.cards
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  c public.cards;
+begin
+  update public.cards set frozen = not frozen
+    where id = p_card_id and user_id = auth.uid()
+    returning * into c;
+  if c.id is null then
+    raise exception 'Card not found';
+  end if;
+  return c;
+end;
+$$;
+
+-- Move USD value from a crypto wallet onto a card's spendable balance.
+create or replace function public.topup_card(p_card_id uuid, p_wallet_id uuid, p_usd_amount numeric)
+returns public.cards
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  w public.wallets;
+  c public.cards;
+  price numeric;
+  asset_amount numeric;
+begin
+  if p_usd_amount is null or p_usd_amount <= 0 then
+    raise exception 'Amount must be positive';
+  end if;
+
+  select * into w from public.wallets where id = p_wallet_id and user_id = auth.uid();
+  if w.id is null then
+    raise exception 'Wallet not found';
+  end if;
+  select coalesce(price, 1) into price from public.market_prices where symbol = w.symbol;
+  asset_amount := p_usd_amount / coalesce(price, 1);
+  if w.balance < asset_amount then
+    raise exception 'Insufficient balance';
+  end if;
+
+  update public.wallets
+    set balance = balance - asset_amount,
+        usd_value = greatest(usd_value - p_usd_amount, 0)
+    where id = w.id;
+
+  update public.cards set balance = balance + p_usd_amount
+    where id = p_card_id and user_id = auth.uid()
+    returning * into c;
+  if c.id is null then
+    raise exception 'Card not found';
+  end if;
+
+  insert into public.transactions (user_id, type, asset, amount, usd_value, status, fee)
+  values (auth.uid(), 'send', w.symbol, asset_amount, p_usd_amount, 'completed', 0);
+
+  return c;
+end;
+$$;
