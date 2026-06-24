@@ -339,7 +339,7 @@ set search_path = public
 as $$
 declare
   w public.wallets;
-  price numeric;
+  v_price numeric;
   fee_pct numeric;
   fee_usd numeric;
   usd_amount numeric;
@@ -357,9 +357,9 @@ begin
     raise exception 'Insufficient balance';
   end if;
 
-  select coalesce(price, 1) into price from public.market_prices where symbol = w.symbol;
+  select price into v_price from public.market_prices where symbol = w.symbol;
   select coalesce(withdrawal_fee_pct, 0.5) into fee_pct from public.admin_settings where id = 1;
-  usd_amount := p_amount * coalesce(price, 1);
+  usd_amount := p_amount * coalesce(v_price, 1);
   fee_usd := usd_amount * coalesce(fee_pct, 0.5) / 100;
 
   update public.wallets
@@ -448,7 +448,7 @@ set search_path = public
 as $$
 declare
   w public.wallets;
-  price numeric;
+  v_price numeric;
   usd_amount numeric;
   stake public.stakes;
 begin
@@ -461,8 +461,8 @@ begin
     raise exception 'Insufficient balance';
   end if;
 
-  select coalesce(price, 1) into price from public.market_prices where symbol = p_symbol;
-  usd_amount := p_amount * coalesce(price, 1);
+  select price into v_price from public.market_prices where symbol = p_symbol;
+  usd_amount := p_amount * coalesce(v_price, 1);
 
   update public.wallets
     set balance = balance - p_amount,
@@ -493,7 +493,7 @@ as $$
 declare
   s public.stakes;
   w public.wallets;
-  price numeric;
+  v_price numeric;
   payout numeric;
   usd_amount numeric;
 begin
@@ -506,8 +506,8 @@ begin
   end if;
 
   payout := s.amount + s.earned;
-  select coalesce(price, 1) into price from public.market_prices where symbol = s.asset;
-  usd_amount := payout * coalesce(price, 1);
+  select price into v_price from public.market_prices where symbol = s.asset;
+  usd_amount := payout * coalesce(v_price, 1);
 
   w := public._get_or_create_wallet(auth.uid(), s.asset, s.asset);
   update public.wallets
@@ -555,7 +555,7 @@ as $$
 declare
   w public.wallets;
   c public.cards;
-  price numeric;
+  v_price numeric;
   asset_amount numeric;
 begin
   if p_usd_amount is null or p_usd_amount <= 0 then
@@ -566,8 +566,8 @@ begin
   if w.id is null then
     raise exception 'Wallet not found';
   end if;
-  select coalesce(price, 1) into price from public.market_prices where symbol = w.symbol;
-  asset_amount := p_usd_amount / coalesce(price, 1);
+  select price into v_price from public.market_prices where symbol = w.symbol;
+  asset_amount := p_usd_amount / coalesce(v_price, 1);
   if w.balance < asset_amount then
     raise exception 'Insufficient balance';
   end if;
@@ -606,7 +606,7 @@ security definer
 set search_path = public
 as $$
 declare
-  price numeric;
+  v_price numeric;
   usd_amount numeric;
   w public.wallets;
   tx public.transactions;
@@ -624,8 +624,8 @@ begin
     raise exception 'Invalid status';
   end if;
 
-  select coalesce(price, 1) into price from public.market_prices where symbol = p_symbol;
-  usd_amount := p_amount * coalesce(price, 1);
+  select price into v_price from public.market_prices where symbol = p_symbol;
+  usd_amount := p_amount * coalesce(v_price, 1);
 
   w := public._get_or_create_wallet(p_user_id, p_symbol, p_symbol);
 
