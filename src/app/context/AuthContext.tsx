@@ -15,7 +15,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    getSession().then(u => { setUser(u); setLoading(false); });
+    getSession()
+      .then(u => setUser(u))
+      .catch(() => setUser(null))
+      .finally(() => setLoading(false));
   }, []);
 
   const logout = async () => {

@@ -187,7 +187,7 @@ export function Transactions() {
       </div>
 
       <div style={{ fontSize: 12, color: '#5A7A9C', textAlign: 'center' }}>
-        Showing {filtered.length} of {TRANSACTIONS.length} transactions
+        Showing {filtered.length} of {txList.length} transactions
       </div>
     </div>
   );

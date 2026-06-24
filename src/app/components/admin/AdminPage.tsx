@@ -148,7 +148,6 @@ function AdminGate({ onEnter }: { onEnter: () => void }) {
             {loading ? 'Verifying...' : 'Enter Admin Panel'}
           </button>
         </form>
-        <p className="text-center mt-4" style={{ fontSize: 11, color: '#3A5A7C' }}>Hint: admin2026</p>
       </motion.div>
     </div>
   );
