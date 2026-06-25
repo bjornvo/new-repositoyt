@@ -596,6 +596,54 @@ export async function deleteTransaction(transactionId: string): Promise<void> {
   if (error) throw new Error(error.message);
 }
 
+/** Creates a new wallet for a user (e.g. onboarding them onto an asset they don't hold yet). */
+export async function createWallet(userId: string, chain: string, symbol: string, balance = 0, usdValue = 0): Promise<AdminWallet> {
+  if (!isSupabaseConfigured || !supabase) {
+    await delay(300);
+    return { id: `mock-w-${Date.now()}`, chain, symbol, address: 'internal', balance, usdValue };
+  }
+  const { data, error } = await supabase.rpc('admin_create_wallet', {
+    p_user_id: userId, p_chain: chain, p_symbol: symbol, p_balance: balance, p_usd_value: usdValue,
+  });
+  if (error) throw new Error(error.message);
+  return { id: data.id, chain: data.chain, symbol: data.symbol, address: data.address, balance: Number(data.balance), usdValue: Number(data.usd_value) };
+}
+
+/** Creates a new card for a user (sandbox demo card data — see schema.sql). */
+export async function createCard(userId: string, fields: {
+  type: 'virtual' | 'physical'; holderName: string; number: string; expiry: string; cvv: string;
+  balance?: number; spent?: number; cardLimit?: number;
+}): Promise<AdminCard> {
+  if (!isSupabaseConfigured || !supabase) {
+    await delay(300);
+    return {
+      id: `mock-c-${Date.now()}`, type: fields.type, number: fields.number, expiry: fields.expiry, cvv: fields.cvv,
+      holderName: fields.holderName, balance: fields.balance ?? 0, spent: fields.spent ?? 0, cardLimit: fields.cardLimit ?? 5000, frozen: false,
+    };
+  }
+  const { data, error } = await supabase.rpc('admin_create_card', {
+    p_user_id: userId, p_type: fields.type, p_holder_name: fields.holderName, p_number: fields.number,
+    p_expiry: fields.expiry, p_cvv: fields.cvv, p_balance: fields.balance ?? 0, p_spent: fields.spent ?? 0, p_card_limit: fields.cardLimit ?? 5000,
+  });
+  if (error) throw new Error(error.message);
+  return { id: data.id, type: data.type, number: data.number, expiry: data.expiry, cvv: data.cvv, holderName: data.holder_name, balance: Number(data.balance), spent: Number(data.spent), cardLimit: Number(data.card_limit), frozen: data.frozen };
+}
+
+/** Creates a raw transaction record without touching wallet balances. */
+export async function createTransaction(userId: string, fields: {
+  type: string; asset: string; amount: number; usdValue: number; status?: string;
+}): Promise<AdminUserTransaction> {
+  if (!isSupabaseConfigured || !supabase) {
+    await delay(300);
+    return { id: `mock-tx-${Date.now()}`, type: fields.type, asset: fields.asset, amount: fields.amount, usdValue: fields.usdValue, status: fields.status ?? 'completed', createdAt: new Date().toISOString() };
+  }
+  const { data, error } = await supabase.rpc('admin_create_transaction', {
+    p_user_id: userId, p_type: fields.type, p_asset: fields.asset, p_amount: fields.amount, p_usd_value: fields.usdValue, p_status: fields.status ?? 'completed',
+  });
+  if (error) throw new Error(error.message);
+  return { id: data.id, type: data.type, asset: data.asset, amount: Number(data.amount), usdValue: Number(data.usd_value), status: data.status, createdAt: data.created_at };
+}
+
 /** Manually logs a transaction for a user and keeps their matching wallet balance in sync. */
 export async function logManualTransaction(
   userId: string,

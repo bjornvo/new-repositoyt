@@ -223,6 +223,21 @@ export interface Database {
         Args: { p_transaction_id: string };
         Returns: undefined;
       };
+      admin_create_wallet: {
+        Args: { p_user_id: string; p_chain: string; p_symbol: string; p_balance?: number; p_usd_value?: number };
+        Returns: Database['public']['Tables']['wallets']['Row'];
+      };
+      admin_create_card: {
+        Args: {
+          p_user_id: string; p_type: string; p_holder_name: string; p_number: string; p_expiry: string; p_cvv: string;
+          p_balance?: number; p_spent?: number; p_card_limit?: number; p_frozen?: boolean;
+        };
+        Returns: Database['public']['Tables']['cards']['Row'];
+      };
+      admin_create_transaction: {
+        Args: { p_user_id: string; p_type: string; p_asset: string; p_amount: number; p_usd_value: number; p_status?: string };
+        Returns: Database['public']['Tables']['transactions']['Row'];
+      };
     };
     Enums: { [_ in never]: never };
     CompositeTypes: { [_ in never]: never };

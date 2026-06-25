@@ -15,6 +15,7 @@ import {
   getAnnouncements, createAnnouncement, toggleAnnouncement, deleteAnnouncement,
   getPlatformSettings, updatePlatformSettings,
   getUserDetail, updateUserProfile, updateWallet, updateCard, deleteCard, updateTransaction, deleteTransaction,
+  createWallet, createCard, createTransaction,
   type AdminStats, type AdminUser, type AdminTransaction, type Announcement, type PlatformSettings,
   type AdminUserDetail, type AdminWallet, type AdminCard, type AdminUserTransaction,
 } from '../../../services/admin';
@@ -118,6 +119,10 @@ export function AdminPage() {
   const [detailTab, setDetailTab] = useState<'profile' | 'wallets' | 'cards' | 'transactions'>('profile');
   const [detailSavingKey, setDetailSavingKey] = useState<string | null>(null);
   const [detailError, setDetailError] = useState('');
+
+  const [newWalletForm, setNewWalletForm] = useState({ chain: '', symbol: '', balance: '0', usdValue: '0' });
+  const [newCardForm, setNewCardForm] = useState({ type: 'virtual' as 'virtual' | 'physical', holderName: '', number: '', expiry: '', cvv: '', balance: '0', spent: '0', cardLimit: '5000' });
+  const [newTxForm2, setNewTxForm2] = useState({ type: 'receive', asset: '', amount: '', usdValue: '', status: 'completed' });
 
   const isAdmin = Boolean(user?.isAdmin);
 
@@ -237,6 +242,9 @@ export function AdminPage() {
     setDetailError('');
     setDetailLoading(true);
     setDetailUser(null);
+    setNewWalletForm({ chain: '', symbol: '', balance: '0', usdValue: '0' });
+    setNewCardForm({ type: 'virtual', holderName: '', number: '', expiry: '', cvv: '', balance: '0', spent: '0', cardLimit: '5000' });
+    setNewTxForm2({ type: 'receive', asset: '', amount: '', usdValue: '', status: 'completed' });
     try {
       const detail = await getUserDetail(u.id);
       setDetailUser(detail);
@@ -244,6 +252,65 @@ export function AdminPage() {
       setDetailError(err instanceof Error ? err.message : 'Failed to load user.');
     } finally {
       setDetailLoading(false);
+    }
+  }
+
+  async function handleAddWallet() {
+    if (!detailUser) return;
+    if (!newWalletForm.chain.trim() || !newWalletForm.symbol.trim()) { setDetailError('Chain and symbol are required.'); return; }
+    setDetailSavingKey('new-wallet');
+    setDetailError('');
+    try {
+      const wallet = await createWallet(detailUser.id, newWalletForm.chain.toUpperCase(), newWalletForm.symbol.toUpperCase(), Number(newWalletForm.balance) || 0, Number(newWalletForm.usdValue) || 0);
+      setDetailUser(prev => prev && { ...prev, wallets: [...prev.wallets, wallet] });
+      setNewWalletForm({ chain: '', symbol: '', balance: '0', usdValue: '0' });
+      refreshUsers();
+    } catch (err: unknown) {
+      setDetailError(err instanceof Error ? err.message : 'Failed to add wallet.');
+    } finally {
+      setDetailSavingKey(null);
+    }
+  }
+
+  async function handleAddCard() {
+    if (!detailUser) return;
+    if (!newCardForm.holderName.trim() || !newCardForm.number.trim() || !newCardForm.expiry.trim() || !newCardForm.cvv.trim()) {
+      setDetailError('Holder name, number, expiry and CVV are required.');
+      return;
+    }
+    setDetailSavingKey('new-card');
+    setDetailError('');
+    try {
+      const card = await createCard(detailUser.id, {
+        type: newCardForm.type, holderName: newCardForm.holderName, number: newCardForm.number, expiry: newCardForm.expiry, cvv: newCardForm.cvv,
+        balance: Number(newCardForm.balance) || 0, spent: Number(newCardForm.spent) || 0, cardLimit: Number(newCardForm.cardLimit) || 5000,
+      });
+      setDetailUser(prev => prev && { ...prev, cards: [...prev.cards, card] });
+      setNewCardForm({ type: 'virtual', holderName: '', number: '', expiry: '', cvv: '', balance: '0', spent: '0', cardLimit: '5000' });
+    } catch (err: unknown) {
+      setDetailError(err instanceof Error ? err.message : 'Failed to add card.');
+    } finally {
+      setDetailSavingKey(null);
+    }
+  }
+
+  async function handleAddTx() {
+    if (!detailUser) return;
+    const amount = Number(newTxForm2.amount);
+    if (!newTxForm2.asset.trim() || !amount || amount <= 0) { setDetailError('Asset and a positive amount are required.'); return; }
+    setDetailSavingKey('new-tx');
+    setDetailError('');
+    try {
+      const tx = await createTransaction(detailUser.id, {
+        type: newTxForm2.type, asset: newTxForm2.asset.toUpperCase(), amount, usdValue: Number(newTxForm2.usdValue) || 0, status: newTxForm2.status,
+      });
+      setDetailUser(prev => prev && { ...prev, transactions: [tx, ...prev.transactions] });
+      setNewTxForm2({ type: 'receive', asset: '', amount: '', usdValue: '', status: 'completed' });
+      getAdminTransactions().then(setTransactions);
+    } catch (err: unknown) {
+      setDetailError(err instanceof Error ? err.message : 'Failed to add transaction.');
+    } finally {
+      setDetailSavingKey(null);
     }
   }
 
@@ -1232,6 +1299,25 @@ export function AdminPage() {
                 {/* Wallets */}
                 {detailTab === 'wallets' && (
                   <div className="space-y-3">
+                    <div className="p-3 rounded-xl" style={{ background: '#0D1E35', border: '1px dashed rgba(0,212,255,0.2)' }}>
+                      <div style={{ fontSize: 12, fontWeight: 600, color: '#E8F0FE', marginBottom: 8 }}>Add wallet</div>
+                      <div className="grid grid-cols-2 gap-2 mb-2">
+                        <input value={newWalletForm.chain} onChange={e => setNewWalletForm({ ...newWalletForm, chain: e.target.value })} placeholder="Chain (e.g. BTC)"
+                          className="px-2.5 py-2 rounded-lg outline-none uppercase" style={{ background: '#0A1628', border: '1px solid rgba(0,212,255,0.1)', color: '#E8F0FE', fontSize: 12, fontFamily: 'var(--font-mono)' }} />
+                        <input value={newWalletForm.symbol} onChange={e => setNewWalletForm({ ...newWalletForm, symbol: e.target.value })} placeholder="Symbol (e.g. BTC)"
+                          className="px-2.5 py-2 rounded-lg outline-none uppercase" style={{ background: '#0A1628', border: '1px solid rgba(0,212,255,0.1)', color: '#E8F0FE', fontSize: 12, fontFamily: 'var(--font-mono)' }} />
+                      </div>
+                      <div className="grid grid-cols-2 gap-2 mb-2">
+                        <input type="number" step="0.00000001" value={newWalletForm.balance} onChange={e => setNewWalletForm({ ...newWalletForm, balance: e.target.value })} placeholder="Balance"
+                          className="px-2.5 py-2 rounded-lg outline-none" style={{ background: '#0A1628', border: '1px solid rgba(0,212,255,0.1)', color: '#E8F0FE', fontSize: 12, fontFamily: 'var(--font-mono)' }} />
+                        <input type="number" step="0.01" value={newWalletForm.usdValue} onChange={e => setNewWalletForm({ ...newWalletForm, usdValue: e.target.value })} placeholder="USD value"
+                          className="px-2.5 py-2 rounded-lg outline-none" style={{ background: '#0A1628', border: '1px solid rgba(0,212,255,0.1)', color: '#E8F0FE', fontSize: 12, fontFamily: 'var(--font-mono)' }} />
+                      </div>
+                      <button onClick={handleAddWallet} disabled={detailSavingKey === 'new-wallet'}
+                        className="px-3 py-1.5 rounded-lg" style={{ background: 'rgba(0,200,150,0.12)', color: '#00C896', fontSize: 11, fontWeight: 700 }}>
+                        {detailSavingKey === 'new-wallet' ? 'Adding…' : '+ Add wallet'}
+                      </button>
+                    </div>
                     {detailUser.wallets.length === 0 && <p style={{ fontSize: 13, color: '#5A7A9C' }}>No wallets yet.</p>}
                     {detailUser.wallets.map(w => (
                       <div key={w.id} className="p-3 rounded-xl" style={{ background: '#0D1E35', border: '1px solid rgba(0,212,255,0.08)' }}>
@@ -1264,6 +1350,38 @@ export function AdminPage() {
                 {/* Cards */}
                 {detailTab === 'cards' && (
                   <div className="space-y-3">
+                    <div className="p-3 rounded-xl" style={{ background: '#0D1E35', border: '1px dashed rgba(0,212,255,0.2)' }}>
+                      <div className="flex items-center justify-between mb-2">
+                        <div style={{ fontSize: 12, fontWeight: 600, color: '#E8F0FE' }}>Add card</div>
+                        <select value={newCardForm.type} onChange={e => setNewCardForm({ ...newCardForm, type: e.target.value as 'virtual' | 'physical' })}
+                          className="px-2 py-1 rounded-lg outline-none" style={{ background: '#0A1628', border: '1px solid rgba(0,212,255,0.1)', color: '#E8F0FE', fontSize: 11 }}>
+                          <option value="virtual">Virtual</option>
+                          <option value="physical">Physical</option>
+                        </select>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2 mb-2">
+                        <input value={newCardForm.holderName} onChange={e => setNewCardForm({ ...newCardForm, holderName: e.target.value })} placeholder="Holder name"
+                          className="px-2.5 py-2 rounded-lg outline-none" style={{ background: '#0A1628', border: '1px solid rgba(0,212,255,0.1)', color: '#E8F0FE', fontSize: 12 }} />
+                        <input value={newCardForm.number} onChange={e => setNewCardForm({ ...newCardForm, number: e.target.value })} placeholder="Card number"
+                          className="px-2.5 py-2 rounded-lg outline-none" style={{ background: '#0A1628', border: '1px solid rgba(0,212,255,0.1)', color: '#E8F0FE', fontSize: 12, fontFamily: 'var(--font-mono)' }} />
+                        <input value={newCardForm.expiry} onChange={e => setNewCardForm({ ...newCardForm, expiry: e.target.value })} placeholder="MM/YY"
+                          className="px-2.5 py-2 rounded-lg outline-none" style={{ background: '#0A1628', border: '1px solid rgba(0,212,255,0.1)', color: '#E8F0FE', fontSize: 12, fontFamily: 'var(--font-mono)' }} />
+                        <input value={newCardForm.cvv} onChange={e => setNewCardForm({ ...newCardForm, cvv: e.target.value })} placeholder="CVV"
+                          className="px-2.5 py-2 rounded-lg outline-none" style={{ background: '#0A1628', border: '1px solid rgba(0,212,255,0.1)', color: '#E8F0FE', fontSize: 12, fontFamily: 'var(--font-mono)' }} />
+                      </div>
+                      <div className="grid grid-cols-3 gap-2 mb-2">
+                        <input type="number" step="0.01" value={newCardForm.balance} onChange={e => setNewCardForm({ ...newCardForm, balance: e.target.value })} placeholder="Balance"
+                          className="px-2.5 py-2 rounded-lg outline-none" style={{ background: '#0A1628', border: '1px solid rgba(0,212,255,0.1)', color: '#E8F0FE', fontSize: 12, fontFamily: 'var(--font-mono)' }} />
+                        <input type="number" step="0.01" value={newCardForm.spent} onChange={e => setNewCardForm({ ...newCardForm, spent: e.target.value })} placeholder="Spent"
+                          className="px-2.5 py-2 rounded-lg outline-none" style={{ background: '#0A1628', border: '1px solid rgba(0,212,255,0.1)', color: '#E8F0FE', fontSize: 12, fontFamily: 'var(--font-mono)' }} />
+                        <input type="number" step="0.01" value={newCardForm.cardLimit} onChange={e => setNewCardForm({ ...newCardForm, cardLimit: e.target.value })} placeholder="Limit"
+                          className="px-2.5 py-2 rounded-lg outline-none" style={{ background: '#0A1628', border: '1px solid rgba(0,212,255,0.1)', color: '#E8F0FE', fontSize: 12, fontFamily: 'var(--font-mono)' }} />
+                      </div>
+                      <button onClick={handleAddCard} disabled={detailSavingKey === 'new-card'}
+                        className="px-3 py-1.5 rounded-lg" style={{ background: 'rgba(0,200,150,0.12)', color: '#00C896', fontSize: 11, fontWeight: 700 }}>
+                        {detailSavingKey === 'new-card' ? 'Adding…' : '+ Add card'}
+                      </button>
+                    </div>
                     {detailUser.cards.length === 0 && <p style={{ fontSize: 13, color: '#5A7A9C' }}>No cards yet.</p>}
                     {detailUser.cards.map(c => (
                       <div key={c.id} className="p-3 rounded-xl" style={{ background: '#0D1E35', border: '1px solid rgba(0,212,255,0.08)' }}>
@@ -1319,6 +1437,39 @@ export function AdminPage() {
                 {/* Transactions */}
                 {detailTab === 'transactions' && (
                   <div className="space-y-3">
+                    <div className="p-3 rounded-xl" style={{ background: '#0D1E35', border: '1px dashed rgba(0,212,255,0.2)' }}>
+                      <div style={{ fontSize: 12, fontWeight: 600, color: '#E8F0FE', marginBottom: 8 }}>Add transaction</div>
+                      <div className="grid grid-cols-2 gap-2 mb-2">
+                        <select value={newTxForm2.type} onChange={e => setNewTxForm2({ ...newTxForm2, type: e.target.value })}
+                          className="px-2.5 py-2 rounded-lg outline-none" style={{ background: '#0A1628', border: '1px solid rgba(0,212,255,0.1)', color: '#E8F0FE', fontSize: 12 }}>
+                          <option value="send">Send</option>
+                          <option value="receive">Receive</option>
+                          <option value="swap">Swap</option>
+                          <option value="stake">Stake</option>
+                          <option value="unstake">Unstake</option>
+                          <option value="earn">Earn</option>
+                        </select>
+                        <input value={newTxForm2.asset} onChange={e => setNewTxForm2({ ...newTxForm2, asset: e.target.value })} placeholder="Asset (e.g. BTC)"
+                          className="px-2.5 py-2 rounded-lg outline-none uppercase" style={{ background: '#0A1628', border: '1px solid rgba(0,212,255,0.1)', color: '#E8F0FE', fontSize: 12, fontFamily: 'var(--font-mono)' }} />
+                      </div>
+                      <div className="grid grid-cols-3 gap-2 mb-2">
+                        <input type="number" step="0.00000001" value={newTxForm2.amount} onChange={e => setNewTxForm2({ ...newTxForm2, amount: e.target.value })} placeholder="Amount"
+                          className="px-2.5 py-2 rounded-lg outline-none" style={{ background: '#0A1628', border: '1px solid rgba(0,212,255,0.1)', color: '#E8F0FE', fontSize: 12, fontFamily: 'var(--font-mono)' }} />
+                        <input type="number" step="0.01" value={newTxForm2.usdValue} onChange={e => setNewTxForm2({ ...newTxForm2, usdValue: e.target.value })} placeholder="USD value"
+                          className="px-2.5 py-2 rounded-lg outline-none" style={{ background: '#0A1628', border: '1px solid rgba(0,212,255,0.1)', color: '#E8F0FE', fontSize: 12, fontFamily: 'var(--font-mono)' }} />
+                        <select value={newTxForm2.status} onChange={e => setNewTxForm2({ ...newTxForm2, status: e.target.value })}
+                          className="px-2.5 py-2 rounded-lg outline-none" style={{ background: '#0A1628', border: '1px solid rgba(0,212,255,0.1)', color: '#E8F0FE', fontSize: 12 }}>
+                          <option value="completed">Completed</option>
+                          <option value="pending">Pending</option>
+                          <option value="failed">Failed</option>
+                        </select>
+                      </div>
+                      <p style={{ fontSize: 10, color: '#3A5A7C', marginBottom: 8 }}>Adds a raw record without touching wallet balances. Use the purple "Log transaction" action from the Users list if it should also credit/debit a wallet.</p>
+                      <button onClick={handleAddTx} disabled={detailSavingKey === 'new-tx'}
+                        className="px-3 py-1.5 rounded-lg" style={{ background: 'rgba(0,200,150,0.12)', color: '#00C896', fontSize: 11, fontWeight: 700 }}>
+                        {detailSavingKey === 'new-tx' ? 'Adding…' : '+ Add transaction'}
+                      </button>
+                    </div>
                     {detailUser.transactions.length === 0 && <p style={{ fontSize: 13, color: '#5A7A9C' }}>No transactions yet.</p>}
                     {detailUser.transactions.map(t => (
                       <div key={t.id} className="p-3 rounded-xl" style={{ background: '#0D1E35', border: '1px solid rgba(0,212,255,0.08)' }}>

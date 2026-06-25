@@ -869,3 +869,107 @@ begin
   delete from public.transactions where id = p_transaction_id;
 end;
 $$;
+
+-- Create a new wallet for any user (e.g. onboarding them onto an asset that
+-- has no balance yet).
+create or replace function public.admin_create_wallet(
+  p_user_id uuid, p_chain text, p_symbol text, p_balance numeric default 0, p_usd_value numeric default 0
+)
+returns public.wallets
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  w public.wallets;
+begin
+  if not public.is_admin() then
+    raise exception 'Forbidden';
+  end if;
+  if p_chain is null or p_chain = '' or p_symbol is null or p_symbol = '' then
+    raise exception 'Chain and symbol are required';
+  end if;
+  if coalesce(p_balance, 0) < 0 or coalesce(p_usd_value, 0) < 0 then
+    raise exception 'Balance and USD value must be non-negative';
+  end if;
+
+  insert into public.wallets (user_id, chain, symbol, address, balance, usd_value)
+  values (p_user_id, p_chain, p_symbol, 'internal', coalesce(p_balance, 0), coalesce(p_usd_value, 0))
+  returning * into w;
+
+  return w;
+end;
+$$;
+
+-- Create a new card for any user (sandbox-only demo card data, see the note
+-- above the cards table).
+create or replace function public.admin_create_card(
+  p_user_id uuid, p_type text, p_holder_name text, p_number text, p_expiry text, p_cvv text,
+  p_balance numeric default 0, p_spent numeric default 0, p_card_limit numeric default 5000, p_frozen boolean default false
+)
+returns public.cards
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  c public.cards;
+begin
+  if not public.is_admin() then
+    raise exception 'Forbidden';
+  end if;
+  if p_type not in ('virtual', 'physical') then
+    raise exception 'Invalid card type';
+  end if;
+  if p_holder_name is null or p_holder_name = '' or p_number is null or p_number = '' or p_expiry is null or p_expiry = '' or p_cvv is null or p_cvv = '' then
+    raise exception 'Holder name, number, expiry and CVV are required';
+  end if;
+  if coalesce(p_balance, 0) < 0 or coalesce(p_spent, 0) < 0 or coalesce(p_card_limit, 0) < 0 then
+    raise exception 'Balance, spent and limit must be non-negative';
+  end if;
+
+  insert into public.cards (user_id, type, number, expiry, cvv, holder_name, balance, spent, card_limit, frozen)
+  values (p_user_id, p_type, p_number, p_expiry, p_cvv, p_holder_name, coalesce(p_balance, 0), coalesce(p_spent, 0), coalesce(p_card_limit, 5000), coalesce(p_frozen, false))
+  returning * into c;
+
+  return c;
+end;
+$$;
+
+-- Create a raw transaction record for any user without touching wallet
+-- balances (use admin_log_transaction instead when the wallet balance should
+-- move in lockstep).
+create or replace function public.admin_create_transaction(
+  p_user_id uuid, p_type text, p_asset text, p_amount numeric, p_usd_value numeric, p_status text default 'completed'
+)
+returns public.transactions
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  tx public.transactions;
+begin
+  if not public.is_admin() then
+    raise exception 'Forbidden';
+  end if;
+  if p_type not in ('send','receive','swap','stake','unstake','earn') then
+    raise exception 'Invalid transaction type';
+  end if;
+  if p_status not in ('completed','pending','failed') then
+    raise exception 'Invalid status';
+  end if;
+  if p_asset is null or p_asset = '' then
+    raise exception 'Asset is required';
+  end if;
+  if p_amount is null or p_amount <= 0 then
+    raise exception 'Amount must be positive';
+  end if;
+
+  insert into public.transactions (user_id, type, asset, amount, usd_value, status, fee)
+  values (p_user_id, p_type, p_asset, p_amount, coalesce(p_usd_value, 0), p_status, 0)
+  returning * into tx;
+
+  return tx;
+end;
+$$;
