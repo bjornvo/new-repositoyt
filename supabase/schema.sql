@@ -164,6 +164,16 @@ drop policy if exists "Admins can read all cards" on public.cards;
 create policy "Admins can read all cards"
   on public.cards for select using (public.is_admin());
 
+-- Link a transaction to a card (e.g. a top-up, a card purchase) so card-side
+-- activity can be kept out of the crypto/wallet ledger view. Null means the
+-- row is a regular crypto transaction.
+alter table public.transactions add column if not exists card_id uuid references public.cards(id) on delete cascade;
+create index if not exists transactions_card_id_idx on public.transactions (card_id);
+
+alter table public.transactions drop constraint if exists transactions_type_check;
+alter table public.transactions add constraint transactions_type_check
+  check (type in ('send','receive','swap','stake','unstake','earn','card_topup','card_spend','card_refund','card_fee','card_adjustment'));
+
 -- ── Market prices ─────────────────────────────────────────────────────────────
 -- Stand-in for a live price feed. Exchange/Portfolio/Ticker read from here so
 -- the whole app shares one consistent set of prices; admins can edit them from
@@ -584,8 +594,8 @@ begin
     raise exception 'Card not found';
   end if;
 
-  insert into public.transactions (user_id, type, asset, amount, usd_value, status, fee)
-  values (auth.uid(), 'send', w.symbol, asset_amount, p_usd_amount, 'completed', 0);
+  insert into public.transactions (user_id, type, asset, amount, usd_value, status, fee, card_id)
+  values (auth.uid(), 'card_topup', w.symbol, asset_amount, p_usd_amount, 'completed', 0, p_card_id);
 
   return c;
 end;
@@ -968,6 +978,62 @@ begin
 
   insert into public.transactions (user_id, type, asset, amount, usd_value, status, fee)
   values (p_user_id, p_type, p_asset, p_amount, coalesce(p_usd_value, 0), p_status, 0)
+  returning * into tx;
+
+  return tx;
+end;
+$$;
+
+-- Log a card-side transaction (topup/spend/refund/fee/adjustment) for any
+-- user's card and keep that card's balance/spent in sync, mirroring how
+-- topup_card and admin_log_transaction keep wallets in sync. Kept entirely
+-- separate from admin_create_transaction/admin_log_transaction so card money
+-- never gets recorded as a crypto-side ledger entry.
+create or replace function public.admin_create_card_transaction(
+  p_card_id uuid, p_type text, p_amount numeric, p_status text default 'completed'
+)
+returns public.transactions
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  c public.cards;
+  tx public.transactions;
+begin
+  if not public.is_admin() then
+    raise exception 'Forbidden';
+  end if;
+  if p_type not in ('card_topup', 'card_spend', 'card_refund', 'card_fee', 'card_adjustment') then
+    raise exception 'Invalid card transaction type';
+  end if;
+  if p_status not in ('completed', 'pending', 'failed') then
+    raise exception 'Invalid status';
+  end if;
+  if p_amount is null or (p_type <> 'card_adjustment' and p_amount <= 0) then
+    raise exception 'Amount must be positive';
+  end if;
+
+  select * into c from public.cards where id = p_card_id;
+  if c.id is null then
+    raise exception 'Card not found';
+  end if;
+
+  if p_type = 'card_topup' then
+    update public.cards set balance = balance + p_amount where id = c.id returning * into c;
+  elsif p_type in ('card_spend', 'card_fee') then
+    if c.balance < p_amount then
+      raise exception 'Insufficient card balance';
+    end if;
+    update public.cards set balance = balance - p_amount, spent = spent + p_amount where id = c.id returning * into c;
+  elsif p_type = 'card_refund' then
+    update public.cards set balance = balance + p_amount, spent = greatest(spent - p_amount, 0) where id = c.id returning * into c;
+  else -- card_adjustment, p_amount may be negative
+    update public.cards set balance = greatest(balance + p_amount, 0) where id = c.id returning * into c;
+  end if;
+
+  insert into public.transactions (user_id, type, asset, amount, usd_value, status, fee, card_id)
+  values (c.user_id, p_type, 'USD', p_amount, p_amount, p_status, 0, c.id)
   returning * into tx;
 
   return tx;

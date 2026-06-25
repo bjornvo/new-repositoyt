@@ -41,7 +41,8 @@ export interface Database {
         Row: {
           id: string;
           user_id: string;
-          type: 'send' | 'receive' | 'swap' | 'stake' | 'unstake' | 'earn';
+          type: 'send' | 'receive' | 'swap' | 'stake' | 'unstake' | 'earn'
+            | 'card_topup' | 'card_spend' | 'card_refund' | 'card_fee' | 'card_adjustment';
           asset: string;
           amount: number;
           usd_value: number;
@@ -50,9 +51,10 @@ export interface Database {
           to_address: string | null;
           tx_hash: string | null;
           fee: number;
+          card_id: string | null;
           created_at: string;
         };
-        Insert: Omit<Database['public']['Tables']['transactions']['Row'], 'id' | 'created_at'>;
+        Insert: Omit<Database['public']['Tables']['transactions']['Row'], 'id' | 'created_at' | 'card_id'> & { card_id?: string | null };
         Update: Partial<Database['public']['Tables']['transactions']['Insert']>;
         Relationships: [];
       };
@@ -236,6 +238,10 @@ export interface Database {
       };
       admin_create_transaction: {
         Args: { p_user_id: string; p_type: string; p_asset: string; p_amount: number; p_usd_value: number; p_status?: string };
+        Returns: Database['public']['Tables']['transactions']['Row'];
+      };
+      admin_create_card_transaction: {
+        Args: { p_card_id: string; p_type: string; p_amount: number; p_status?: string };
         Returns: Database['public']['Tables']['transactions']['Row'];
       };
     };

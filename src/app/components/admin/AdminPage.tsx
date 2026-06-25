@@ -15,9 +15,9 @@ import {
   getAnnouncements, createAnnouncement, toggleAnnouncement, deleteAnnouncement,
   getPlatformSettings, updatePlatformSettings,
   getUserDetail, updateUserProfile, updateWallet, updateCard, deleteCard, updateTransaction, deleteTransaction,
-  createWallet, createCard, createTransaction,
+  createWallet, createCard, createTransaction, createCardTransaction,
   type AdminStats, type AdminUser, type AdminTransaction, type Announcement, type PlatformSettings,
-  type AdminUserDetail, type AdminWallet, type AdminCard, type AdminUserTransaction,
+  type AdminUserDetail, type AdminWallet, type AdminCard, type AdminUserTransaction, type CardTransactionType,
 } from '../../../services/admin';
 import {
   AreaChart, Area, BarChart, Bar, LineChart, Line,
@@ -123,6 +123,7 @@ export function AdminPage() {
   const [newWalletForm, setNewWalletForm] = useState({ chain: '', symbol: '', balance: '0', usdValue: '0' });
   const [newCardForm, setNewCardForm] = useState({ type: 'virtual' as 'virtual' | 'physical', holderName: '', number: '', expiry: '', cvv: '', balance: '0', spent: '0', cardLimit: '5000' });
   const [newTxForm2, setNewTxForm2] = useState({ type: 'receive', asset: '', amount: '', usdValue: '', status: 'completed' });
+  const [newCardTxForm, setNewCardTxForm] = useState<Record<string, { type: CardTransactionType; amount: string; status: string }>>({});
 
   const isAdmin = Boolean(user?.isAdmin);
 
@@ -302,13 +303,50 @@ export function AdminPage() {
     setDetailError('');
     try {
       const tx = await createTransaction(detailUser.id, {
-        type: newTxForm2.type, asset: newTxForm2.asset.toUpperCase(), amount, usdValue: Number(newTxForm2.usdValue) || 0, status: newTxForm2.status,
+        type: newTxForm2.type as 'send' | 'receive' | 'swap' | 'stake' | 'unstake' | 'earn', asset: newTxForm2.asset.toUpperCase(), amount, usdValue: Number(newTxForm2.usdValue) || 0, status: newTxForm2.status,
       });
       setDetailUser(prev => prev && { ...prev, transactions: [tx, ...prev.transactions] });
       setNewTxForm2({ type: 'receive', asset: '', amount: '', usdValue: '', status: 'completed' });
       getAdminTransactions().then(setTransactions);
     } catch (err: unknown) {
       setDetailError(err instanceof Error ? err.message : 'Failed to add transaction.');
+    } finally {
+      setDetailSavingKey(null);
+    }
+  }
+
+  function cardTxForm(cardId: string) {
+    return newCardTxForm[cardId] ?? { type: 'card_topup' as CardTransactionType, amount: '', status: 'completed' };
+  }
+
+  function patchCardTxForm(cardId: string, patch: Partial<{ type: CardTransactionType; amount: string; status: string }>) {
+    setNewCardTxForm(prev => ({ ...prev, [cardId]: { ...cardTxForm(cardId), ...patch } }));
+  }
+
+  async function handleAddCardTx(card: AdminCard) {
+    if (!detailUser) return;
+    const form = cardTxForm(card.id);
+    const amount = Number(form.amount);
+    if (!amount || (form.type !== 'card_adjustment' && amount <= 0)) { setDetailError('A valid amount is required.'); return; }
+    setDetailSavingKey(`card-tx-${card.id}`);
+    setDetailError('');
+    try {
+      const tx = await createCardTransaction(card.id, form.type, amount, form.status);
+      setDetailUser(prev => {
+        if (!prev) return prev;
+        const balanceDelta = form.type === 'card_spend' || form.type === 'card_fee' ? -amount : amount;
+        const spentDelta = form.type === 'card_spend' || form.type === 'card_fee' ? amount : form.type === 'card_refund' ? -amount : 0;
+        return {
+          ...prev,
+          cards: prev.cards.map(c => c.id === card.id
+            ? { ...c, balance: Math.max(c.balance + balanceDelta, 0), spent: Math.max(c.spent + spentDelta, 0) }
+            : c),
+          transactions: [tx, ...prev.transactions],
+        };
+      });
+      setNewCardTxForm(prev => ({ ...prev, [card.id]: { type: 'card_topup', amount: '', status: 'completed' } }));
+    } catch (err: unknown) {
+      setDetailError(err instanceof Error ? err.message : 'Failed to add card transaction.');
     } finally {
       setDetailSavingKey(null);
     }
@@ -1230,7 +1268,7 @@ export function AdminPage() {
                     <button key={t} onClick={() => setDetailTab(t)}
                       className="px-3 py-1.5 rounded-lg capitalize text-xs font-semibold"
                       style={{ background: detailTab === t ? 'rgba(0,212,255,0.12)' : '#0D1E35', border: `1px solid ${detailTab === t ? 'rgba(0,212,255,0.3)' : 'rgba(0,212,255,0.06)'}`, color: detailTab === t ? '#00D4FF' : '#5A7A9C' }}>
-                      {t}
+                      {t === 'transactions' ? 'Crypto Tx' : t}
                     </button>
                   ))}
                 </div>
@@ -1427,6 +1465,51 @@ export function AdminPage() {
                             Delete card
                           </button>
                         </div>
+
+                        {/* Card transactions — separate ledger from crypto, scoped to this card */}
+                        <div className="mt-3 pt-3" style={{ borderTop: '1px solid rgba(0,212,255,0.06)' }}>
+                          <div style={{ fontSize: 11, fontWeight: 600, color: '#5A7A9C', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 }}>Card transactions</div>
+                          <div className="grid grid-cols-3 gap-2 mb-2">
+                            <select value={cardTxForm(c.id).type} onChange={e => patchCardTxForm(c.id, { type: e.target.value as CardTransactionType })}
+                              className="px-2.5 py-2 rounded-lg outline-none" style={{ background: '#0A1628', border: '1px solid rgba(0,212,255,0.1)', color: '#E8F0FE', fontSize: 12 }}>
+                              <option value="card_topup">Topup</option>
+                              <option value="card_spend">Spend</option>
+                              <option value="card_refund">Refund</option>
+                              <option value="card_fee">Fee</option>
+                              <option value="card_adjustment">Adjustment</option>
+                            </select>
+                            <input type="number" step="0.01" value={cardTxForm(c.id).amount} onChange={e => patchCardTxForm(c.id, { amount: e.target.value })} placeholder="Amount"
+                              className="px-2.5 py-2 rounded-lg outline-none" style={{ background: '#0A1628', border: '1px solid rgba(0,212,255,0.1)', color: '#E8F0FE', fontSize: 12, fontFamily: 'var(--font-mono)' }} />
+                            <select value={cardTxForm(c.id).status} onChange={e => patchCardTxForm(c.id, { status: e.target.value })}
+                              className="px-2.5 py-2 rounded-lg outline-none" style={{ background: '#0A1628', border: '1px solid rgba(0,212,255,0.1)', color: '#E8F0FE', fontSize: 12 }}>
+                              <option value="completed">Completed</option>
+                              <option value="pending">Pending</option>
+                              <option value="failed">Failed</option>
+                            </select>
+                          </div>
+                          <button onClick={() => handleAddCardTx(c)} disabled={detailSavingKey === `card-tx-${c.id}`}
+                            className="px-3 py-1.5 rounded-lg mb-2" style={{ background: 'rgba(0,200,150,0.12)', color: '#00C896', fontSize: 11, fontWeight: 700 }}>
+                            {detailSavingKey === `card-tx-${c.id}` ? 'Adding…' : '+ Add card transaction'}
+                          </button>
+                          {detailUser.transactions.filter(t => t.cardId === c.id).length === 0 && (
+                            <p style={{ fontSize: 12, color: '#5A7A9C' }}>No card transactions yet.</p>
+                          )}
+                          {detailUser.transactions.filter(t => t.cardId === c.id).map(t => (
+                            <div key={t.id} className="flex items-center justify-between py-1.5" style={{ borderTop: '1px solid rgba(0,212,255,0.04)' }}>
+                              <div style={{ fontSize: 12, color: '#E8F0FE' }}>
+                                <span style={{ textTransform: 'capitalize' }}>{t.type.replace('card_', '')}</span>
+                                <span style={{ color: '#5A7A9C' }}> · {new Date(t.createdAt).toLocaleDateString()} · {t.status}</span>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: '#E8F0FE' }}>${t.amount.toFixed(2)}</span>
+                                <button onClick={() => handleDeleteTx(t)} disabled={detailSavingKey === `tx-${t.id}`}
+                                  className="px-2 py-1 rounded" style={{ background: 'rgba(255,59,92,0.1)', color: '#FF3B5C', fontSize: 10, fontWeight: 700 }}>
+                                  Delete
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -1435,8 +1518,9 @@ export function AdminPage() {
                 {/* Transactions */}
                 {detailTab === 'transactions' && (
                   <div className="space-y-3">
+                    <p style={{ fontSize: 11, color: '#5A7A9C', marginTop: -4 }}>Crypto/wallet ledger only — card activity lives under each card in the Cards tab.</p>
                     <div className="p-3 rounded-xl" style={{ background: '#0D1E35', border: '1px dashed rgba(0,212,255,0.2)' }}>
-                      <div style={{ fontSize: 12, fontWeight: 600, color: '#E8F0FE', marginBottom: 8 }}>Add transaction</div>
+                      <div style={{ fontSize: 12, fontWeight: 600, color: '#E8F0FE', marginBottom: 8 }}>Add crypto transaction</div>
                       <div className="grid grid-cols-2 gap-2 mb-2">
                         <select value={newTxForm2.type} onChange={e => setNewTxForm2({ ...newTxForm2, type: e.target.value })}
                           className="px-2.5 py-2 rounded-lg outline-none" style={{ background: '#0A1628', border: '1px solid rgba(0,212,255,0.1)', color: '#E8F0FE', fontSize: 12 }}>
@@ -1468,8 +1552,8 @@ export function AdminPage() {
                         {detailSavingKey === 'new-tx' ? 'Adding…' : '+ Add transaction'}
                       </button>
                     </div>
-                    {detailUser.transactions.length === 0 && <p style={{ fontSize: 13, color: '#5A7A9C' }}>No transactions yet.</p>}
-                    {detailUser.transactions.map(t => (
+                    {detailUser.transactions.filter(t => !t.cardId).length === 0 && <p style={{ fontSize: 13, color: '#5A7A9C' }}>No crypto transactions yet.</p>}
+                    {detailUser.transactions.filter(t => !t.cardId).map(t => (
                       <div key={t.id} className="p-3 rounded-xl" style={{ background: '#0D1E35', border: '1px solid rgba(0,212,255,0.08)' }}>
                         <div style={{ fontSize: 11, color: '#5A7A9C', marginBottom: 8 }}>{new Date(t.createdAt).toLocaleString()}</div>
                         <div className="grid grid-cols-2 gap-2 mb-2">

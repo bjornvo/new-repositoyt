@@ -84,6 +84,8 @@ export interface AdminUserTransaction {
   usdValue: number;
   status: string;
   createdAt: string;
+  /** Set when this is a card-side transaction (topup/spend/refund/fee/adjustment); null for crypto transactions. */
+  cardId: string | null;
 }
 
 export interface AdminUserDetail {
@@ -517,7 +519,7 @@ export async function getUserDetail(userId: string): Promise<AdminUserDetail> {
     createdAt: profile.created_at,
     wallets: (wallets ?? []).map(w => ({ id: w.id, chain: w.chain, symbol: w.symbol, address: w.address, balance: Number(w.balance), usdValue: Number(w.usd_value) })),
     cards: (cards ?? []).map(c => ({ id: c.id, type: c.type, number: c.number, expiry: c.expiry, cvv: c.cvv, holderName: c.holder_name, balance: Number(c.balance), spent: Number(c.spent), cardLimit: Number(c.card_limit), frozen: c.frozen })),
-    transactions: (txs ?? []).map(t => ({ id: t.id, type: t.type, asset: t.asset, amount: Number(t.amount), usdValue: Number(t.usd_value), status: t.status, createdAt: t.created_at })),
+    transactions: (txs ?? []).map(t => ({ id: t.id, type: t.type, asset: t.asset, amount: Number(t.amount), usdValue: Number(t.usd_value), status: t.status, createdAt: t.created_at, cardId: t.card_id ?? null })),
   };
 }
 
@@ -629,19 +631,34 @@ export async function createCard(userId: string, fields: {
   return { id: data.id, type: data.type, number: data.number, expiry: data.expiry, cvv: data.cvv, holderName: data.holder_name, balance: Number(data.balance), spent: Number(data.spent), cardLimit: Number(data.card_limit), frozen: data.frozen };
 }
 
-/** Creates a raw transaction record without touching wallet balances. */
+/** Creates a raw crypto transaction record without touching wallet balances. */
 export async function createTransaction(userId: string, fields: {
-  type: string; asset: string; amount: number; usdValue: number; status?: string;
+  type: 'send' | 'receive' | 'swap' | 'stake' | 'unstake' | 'earn'; asset: string; amount: number; usdValue: number; status?: string;
 }): Promise<AdminUserTransaction> {
   if (!isSupabaseConfigured || !supabase) {
     await delay(300);
-    return { id: `mock-tx-${Date.now()}`, type: fields.type, asset: fields.asset, amount: fields.amount, usdValue: fields.usdValue, status: fields.status ?? 'completed', createdAt: new Date().toISOString() };
+    return { id: `mock-tx-${Date.now()}`, type: fields.type, asset: fields.asset, amount: fields.amount, usdValue: fields.usdValue, status: fields.status ?? 'completed', createdAt: new Date().toISOString(), cardId: null };
   }
   const { data, error } = await supabase.rpc('admin_create_transaction', {
     p_user_id: userId, p_type: fields.type, p_asset: fields.asset, p_amount: fields.amount, p_usd_value: fields.usdValue, p_status: fields.status ?? 'completed',
   });
   if (error) throw new Error(error.message);
-  return { id: data.id, type: data.type, asset: data.asset, amount: Number(data.amount), usdValue: Number(data.usd_value), status: data.status, createdAt: data.created_at };
+  return { id: data.id, type: data.type, asset: data.asset, amount: Number(data.amount), usdValue: Number(data.usd_value), status: data.status, createdAt: data.created_at, cardId: data.card_id ?? null };
+}
+
+export type CardTransactionType = 'card_topup' | 'card_spend' | 'card_refund' | 'card_fee' | 'card_adjustment';
+
+/** Logs a card-side transaction (topup/spend/refund/fee/adjustment) and keeps that card's balance/spent in sync. */
+export async function createCardTransaction(cardId: string, type: CardTransactionType, amount: number, status: string = 'completed'): Promise<AdminUserTransaction> {
+  if (!isSupabaseConfigured || !supabase) {
+    await delay(300);
+    return { id: `mock-ctx-${Date.now()}`, type, asset: 'USD', amount, usdValue: amount, status, createdAt: new Date().toISOString(), cardId };
+  }
+  const { data, error } = await supabase.rpc('admin_create_card_transaction', {
+    p_card_id: cardId, p_type: type, p_amount: amount, p_status: status,
+  });
+  if (error) throw new Error(error.message);
+  return { id: data.id, type: data.type, asset: data.asset, amount: Number(data.amount), usdValue: Number(data.usd_value), status: data.status, createdAt: data.created_at, cardId: data.card_id ?? null };
 }
 
 /** Manually logs a transaction for a user and keeps their matching wallet balance in sync. */

@@ -10,14 +10,6 @@ const CARD_GRADIENTS = {
   physical: 'linear-gradient(135deg, #1A1A2E 0%, #16213E 50%, #0F3460 100%)',
 };
 
-const CARD_TRANSACTIONS = [
-  { merchant: 'Apple Store', amount: '-$129.00', date: 'Jun 10', category: 'Tech' },
-  { merchant: 'Uber', amount: '-$24.50', date: 'Jun 9', category: 'Transport' },
-  { merchant: 'Whole Foods', amount: '-$87.30', date: 'Jun 9', category: 'Food' },
-  { merchant: 'Netflix', amount: '-$15.99', date: 'Jun 8', category: 'Entertainment' },
-  { merchant: 'Shell Gas', amount: '-$52.40', date: 'Jun 7', category: 'Transport' },
-];
-
 export function Cards() {
   const { t } = useLang();
   const { user } = useAuth();
@@ -290,24 +282,9 @@ export function Cards() {
             <div className="px-4 py-3" style={{ borderBottom: '1px solid rgba(0,212,255,0.06)', fontSize: 13, fontWeight: 600, color: '#E8F0FE' }}>
               Recent Transactions
             </div>
-            {CARD_TRANSACTIONS.map((tx, i) => (
-              <div
-                key={i}
-                className="flex items-center justify-between px-4 py-2.5"
-                style={{ borderBottom: i < CARD_TRANSACTIONS.length - 1 ? '1px solid rgba(0,212,255,0.04)' : 'none' }}
-              >
-                <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: 'rgba(0,212,255,0.06)' }}>
-                    <span style={{ fontSize: 10, color: '#5A7A9C' }}>{tx.merchant[0]}</span>
-                  </div>
-                  <div>
-                    <div style={{ fontSize: 13, fontWeight: 600, color: '#E8F0FE' }}>{tx.merchant}</div>
-                    <div style={{ fontSize: 11, color: '#5A7A9C' }}>{tx.category} · {tx.date}</div>
-                  </div>
-                </div>
-                <span style={{ fontFamily: 'var(--font-mono)', fontSize: 13, fontWeight: 600, color: '#FF3B5C' }}>{tx.amount}</span>
-              </div>
-            ))}
+            <div className="px-4 py-6 text-center" style={{ color: '#5A7A9C', fontSize: 13 }}>
+              No transactions yet.
+            </div>
           </div>
         </div>
       </div>

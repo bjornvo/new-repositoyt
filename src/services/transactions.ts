@@ -38,11 +38,13 @@ export async function getTransactions(userId: string, limit = 50): Promise<Trans
     .limit(limit);
   if (error) throw new Error(error.message);
 
-  return (data ?? []).map(r => ({
-    id: r.id, type: r.type, asset: r.asset, amount: r.amount, usdValue: r.usd_value,
-    status: r.status, fromAddress: r.from_address, toAddress: r.to_address,
-    txHash: r.tx_hash, fee: r.fee, createdAt: r.created_at,
-  }));
+  return (data ?? [])
+    .filter(r => !r.card_id)
+    .map(r => ({
+      id: r.id, type: r.type as Transaction['type'], asset: r.asset, amount: r.amount, usdValue: r.usd_value,
+      status: r.status, fromAddress: r.from_address, toAddress: r.to_address,
+      txHash: r.tx_hash, fee: r.fee, createdAt: r.created_at,
+    }));
 }
 
 export async function createTransaction(userId: string, tx: Omit<Transaction, 'id' | 'createdAt'>): Promise<Transaction> {
@@ -66,7 +68,7 @@ export async function createTransaction(userId: string, tx: Omit<Transaction, 'i
   }).select().single();
   if (error) throw new Error(error.message);
 
-  return { id: data.id, type: data.type, asset: data.asset, amount: data.amount, usdValue: data.usd_value,
+  return { id: data.id, type: data.type as Transaction['type'], asset: data.asset, amount: data.amount, usdValue: data.usd_value,
     status: data.status, fromAddress: data.from_address, toAddress: data.to_address,
     txHash: data.tx_hash, fee: data.fee, createdAt: data.created_at };
 }
