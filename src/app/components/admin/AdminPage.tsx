@@ -14,7 +14,9 @@ import {
   updateKycStatus, adjustUserBalance, createUser, deleteUser, logManualTransaction,
   getAnnouncements, createAnnouncement, toggleAnnouncement, deleteAnnouncement,
   getPlatformSettings, updatePlatformSettings,
+  getUserDetail, updateUserProfile, updateWallet, updateCard, deleteCard, updateTransaction, deleteTransaction,
   type AdminStats, type AdminUser, type AdminTransaction, type Announcement, type PlatformSettings,
+  type AdminUserDetail, type AdminWallet, type AdminCard, type AdminUserTransaction,
 } from '../../../services/admin';
 import {
   AreaChart, Area, BarChart, Bar, LineChart, Line,
@@ -110,6 +112,12 @@ export function AdminPage() {
   const [txError, setTxError] = useState('');
 
   const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  const [detailUser, setDetailUser] = useState<AdminUserDetail | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailTab, setDetailTab] = useState<'profile' | 'wallets' | 'cards' | 'transactions'>('profile');
+  const [detailSavingKey, setDetailSavingKey] = useState<string | null>(null);
+  const [detailError, setDetailError] = useState('');
 
   const isAdmin = Boolean(user?.isAdmin);
 
@@ -221,6 +229,115 @@ export function AdminPage() {
       setTxError(err instanceof Error ? err.message : 'Failed to log transaction.');
     } finally {
       setLoggingTx(false);
+    }
+  }
+
+  async function openUserDetail(u: AdminUser) {
+    setDetailTab('profile');
+    setDetailError('');
+    setDetailLoading(true);
+    setDetailUser(null);
+    try {
+      const detail = await getUserDetail(u.id);
+      setDetailUser(detail);
+    } catch (err: unknown) {
+      setDetailError(err instanceof Error ? err.message : 'Failed to load user.');
+    } finally {
+      setDetailLoading(false);
+    }
+  }
+
+  async function handleSaveProfile() {
+    if (!detailUser) return;
+    setDetailSavingKey('profile');
+    setDetailError('');
+    try {
+      await updateUserProfile(detailUser.id, {
+        firstName: detailUser.firstName, lastName: detailUser.lastName, plan: detailUser.plan,
+        kycStatus: detailUser.kycStatus, twoFaEnabled: detailUser.twoFaEnabled, isSuspended: detailUser.isSuspended,
+      });
+      refreshUsers();
+    } catch (err: unknown) {
+      setDetailError(err instanceof Error ? err.message : 'Failed to save profile.');
+    } finally {
+      setDetailSavingKey(null);
+    }
+  }
+
+  function patchWallet(id: string, patch: Partial<AdminWallet>) {
+    setDetailUser(prev => prev && { ...prev, wallets: prev.wallets.map(w => (w.id === id ? { ...w, ...patch } : w)) });
+  }
+
+  async function handleSaveWallet(w: AdminWallet) {
+    setDetailSavingKey(`wallet-${w.id}`);
+    setDetailError('');
+    try {
+      await updateWallet(w.id, w.balance, w.usdValue);
+      refreshUsers();
+    } catch (err: unknown) {
+      setDetailError(err instanceof Error ? err.message : 'Failed to save wallet.');
+    } finally {
+      setDetailSavingKey(null);
+    }
+  }
+
+  function patchCard(id: string, patch: Partial<AdminCard>) {
+    setDetailUser(prev => prev && { ...prev, cards: prev.cards.map(c => (c.id === id ? { ...c, ...patch } : c)) });
+  }
+
+  async function handleSaveCard(c: AdminCard) {
+    setDetailSavingKey(`card-${c.id}`);
+    setDetailError('');
+    try {
+      await updateCard(c.id, c);
+    } catch (err: unknown) {
+      setDetailError(err instanceof Error ? err.message : 'Failed to save card.');
+    } finally {
+      setDetailSavingKey(null);
+    }
+  }
+
+  async function handleDeleteCard(c: AdminCard) {
+    if (!detailUser || !window.confirm('Delete this card permanently?')) return;
+    setDetailSavingKey(`card-${c.id}`);
+    try {
+      await deleteCard(c.id);
+      setDetailUser(prev => prev && { ...prev, cards: prev.cards.filter(x => x.id !== c.id) });
+    } catch (err: unknown) {
+      setDetailError(err instanceof Error ? err.message : 'Failed to delete card.');
+    } finally {
+      setDetailSavingKey(null);
+    }
+  }
+
+  function patchTx(id: string, patch: Partial<AdminUserTransaction>) {
+    setDetailUser(prev => prev && { ...prev, transactions: prev.transactions.map(t => (t.id === id ? { ...t, ...patch } : t)) });
+  }
+
+  async function handleSaveTx(t: AdminUserTransaction) {
+    setDetailSavingKey(`tx-${t.id}`);
+    setDetailError('');
+    try {
+      await updateTransaction(t.id, { type: t.type, asset: t.asset, amount: t.amount, usdValue: t.usdValue, status: t.status });
+      getAdminTransactions().then(setTransactions);
+    } catch (err: unknown) {
+      setDetailError(err instanceof Error ? err.message : 'Failed to save transaction.');
+    } finally {
+      setDetailSavingKey(null);
+    }
+  }
+
+  async function handleDeleteTx(t: AdminUserTransaction) {
+    if (!detailUser || !window.confirm('Delete this transaction permanently?')) return;
+    setDetailSavingKey(`tx-${t.id}`);
+    try {
+      await deleteTransaction(t.id);
+      setDetailUser(prev => prev && { ...prev, transactions: prev.transactions.filter(x => x.id !== t.id) });
+      getAdminTransactions().then(setTransactions);
+    } catch (err: unknown) {
+      setDetailError(err instanceof Error ? err.message : 'Failed to delete transaction.');
+    } finally {
+      setDetailSavingKey(null);
     }
   }
 
@@ -547,9 +664,9 @@ export function AdminPage() {
                       </button>
                     </div>
                     <div className="flex gap-1.5">
-                      <button className="w-6 h-6 rounded-lg flex items-center justify-center"
+                      <button onClick={() => openUserDetail(u)} className="w-6 h-6 rounded-lg flex items-center justify-center"
                         style={{ background: 'rgba(0,212,255,0.08)' }}
-                        title="View details">
+                        title="View / edit all details">
                         <Eye size={11} style={{ color: '#00D4FF' }} />
                       </button>
                       <button onClick={() => { setTxUser(u); setTxError(''); }}
@@ -1009,6 +1126,253 @@ export function AdminPage() {
                 </button>
               </div>
             </div>
+          </motion.div>
+        </div>
+      )}
+
+      {/* ── User detail / full edit modal ── */}
+      {(detailUser || detailLoading) && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ background: 'rgba(3,8,16,0.7)', backdropFilter: 'blur(4px)' }}
+          onClick={() => { setDetailUser(null); setDetailLoading(false); }}>
+          <motion.div initial={{ opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }}
+            onClick={e => e.stopPropagation()}
+            className="w-full max-w-2xl rounded-2xl p-6 relative max-h-[85vh] overflow-y-auto"
+            style={{ background: '#0A1628', border: '1px solid rgba(0,212,255,0.15)', boxShadow: '0 0 80px rgba(0,0,0,0.6)' }}>
+            <button onClick={() => { setDetailUser(null); setDetailLoading(false); }}
+              className="absolute top-4 right-4 w-7 h-7 rounded-lg flex items-center justify-center"
+              style={{ background: 'rgba(0,212,255,0.06)' }}>
+              <X size={14} style={{ color: '#5A7A9C' }} />
+            </button>
+
+            {detailLoading && <div style={{ color: '#5A7A9C', fontSize: 13 }}>Loading user…</div>}
+
+            {detailUser && (
+              <>
+                <div className="flex items-center gap-2.5 mb-4">
+                  <div className="w-9 h-9 rounded-xl flex items-center justify-center"
+                    style={{ background: 'rgba(0,212,255,0.1)', border: '1px solid rgba(0,212,255,0.2)' }}>
+                    <Eye size={16} style={{ color: '#00D4FF' }} />
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 15, fontWeight: 800, color: '#E8F0FE' }}>{detailUser.firstName} {detailUser.lastName}</div>
+                    <div style={{ fontSize: 12, color: '#5A7A9C' }}>{detailUser.email}</div>
+                  </div>
+                </div>
+
+                <div className="flex gap-1.5 mb-4">
+                  {(['profile', 'wallets', 'cards', 'transactions'] as const).map(t => (
+                    <button key={t} onClick={() => setDetailTab(t)}
+                      className="px-3 py-1.5 rounded-lg capitalize text-xs font-semibold"
+                      style={{ background: detailTab === t ? 'rgba(0,212,255,0.12)' : '#0D1E35', border: `1px solid ${detailTab === t ? 'rgba(0,212,255,0.3)' : 'rgba(0,212,255,0.06)'}`, color: detailTab === t ? '#00D4FF' : '#5A7A9C' }}>
+                      {t}
+                    </button>
+                  ))}
+                </div>
+
+                {detailError && <p style={{ fontSize: 12, color: '#FF3B5C', marginBottom: 10 }}>{detailError}</p>}
+
+                {/* Profile */}
+                {detailTab === 'profile' && (
+                  <div className="space-y-3">
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label style={{ fontSize: 11, color: '#5A7A9C', display: 'block', marginBottom: 4 }}>First name</label>
+                        <input value={detailUser.firstName} onChange={e => setDetailUser({ ...detailUser, firstName: e.target.value })}
+                          className="w-full px-3 py-2.5 rounded-xl outline-none"
+                          style={{ background: '#0D1E35', border: '1px solid rgba(0,212,255,0.12)', color: '#E8F0FE', fontSize: 13 }} />
+                      </div>
+                      <div>
+                        <label style={{ fontSize: 11, color: '#5A7A9C', display: 'block', marginBottom: 4 }}>Last name</label>
+                        <input value={detailUser.lastName} onChange={e => setDetailUser({ ...detailUser, lastName: e.target.value })}
+                          className="w-full px-3 py-2.5 rounded-xl outline-none"
+                          style={{ background: '#0D1E35', border: '1px solid rgba(0,212,255,0.12)', color: '#E8F0FE', fontSize: 13 }} />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label style={{ fontSize: 11, color: '#5A7A9C', display: 'block', marginBottom: 4 }}>Plan</label>
+                        <select value={detailUser.plan} onChange={e => setDetailUser({ ...detailUser, plan: e.target.value as AdminUserDetail['plan'] })}
+                          className="w-full px-3 py-2.5 rounded-xl outline-none"
+                          style={{ background: '#0D1E35', border: '1px solid rgba(0,212,255,0.12)', color: '#E8F0FE', fontSize: 13 }}>
+                          <option value="starter">Starter</option>
+                          <option value="pro">Pro</option>
+                          <option value="institutional">Institutional</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label style={{ fontSize: 11, color: '#5A7A9C', display: 'block', marginBottom: 4 }}>KYC status</label>
+                        <select value={detailUser.kycStatus} onChange={e => setDetailUser({ ...detailUser, kycStatus: e.target.value as AdminUserDetail['kycStatus'] })}
+                          className="w-full px-3 py-2.5 rounded-xl outline-none"
+                          style={{ background: '#0D1E35', border: '1px solid rgba(0,212,255,0.12)', color: '#E8F0FE', fontSize: 13 }}>
+                          <option value="pending">Pending</option>
+                          <option value="verified">Verified</option>
+                          <option value="rejected">Rejected</option>
+                        </select>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-5 pt-1">
+                      <label className="flex items-center gap-2" style={{ fontSize: 12, color: '#5A7A9C' }}>
+                        <input type="checkbox" checked={detailUser.twoFaEnabled} onChange={e => setDetailUser({ ...detailUser, twoFaEnabled: e.target.checked })} />
+                        2FA enabled
+                      </label>
+                      <label className="flex items-center gap-2" style={{ fontSize: 12, color: '#5A7A9C' }}>
+                        <input type="checkbox" checked={detailUser.isSuspended} onChange={e => setDetailUser({ ...detailUser, isSuspended: e.target.checked })} />
+                        Suspended
+                      </label>
+                    </div>
+                    <button onClick={handleSaveProfile} disabled={detailSavingKey === 'profile'}
+                      className="w-full py-2.5 rounded-xl mt-2"
+                      style={{ background: 'linear-gradient(135deg, #00D4FF, #0066FF)', color: '#050B14', fontWeight: 700, fontSize: 13, opacity: detailSavingKey === 'profile' ? 0.7 : 1 }}>
+                      {detailSavingKey === 'profile' ? 'Saving…' : 'Save profile'}
+                    </button>
+                  </div>
+                )}
+
+                {/* Wallets */}
+                {detailTab === 'wallets' && (
+                  <div className="space-y-3">
+                    {detailUser.wallets.length === 0 && <p style={{ fontSize: 13, color: '#5A7A9C' }}>No wallets yet.</p>}
+                    {detailUser.wallets.map(w => (
+                      <div key={w.id} className="p-3 rounded-xl" style={{ background: '#0D1E35', border: '1px solid rgba(0,212,255,0.08)' }}>
+                        <div style={{ fontSize: 12, fontWeight: 600, color: '#E8F0FE', marginBottom: 8 }}>{w.symbol} <span style={{ color: '#5A7A9C' }}>· {w.chain}</span></div>
+                        <div className="grid grid-cols-2 gap-2 mb-2">
+                          <div>
+                            <label style={{ fontSize: 10, color: '#5A7A9C', display: 'block', marginBottom: 3 }}>Balance ({w.symbol})</label>
+                            <input type="number" step="0.00000001" value={w.balance}
+                              onChange={e => patchWallet(w.id, { balance: Number(e.target.value) })}
+                              className="w-full px-2.5 py-2 rounded-lg outline-none"
+                              style={{ background: '#0A1628', border: '1px solid rgba(0,212,255,0.1)', color: '#E8F0FE', fontSize: 12, fontFamily: 'var(--font-mono)' }} />
+                          </div>
+                          <div>
+                            <label style={{ fontSize: 10, color: '#5A7A9C', display: 'block', marginBottom: 3 }}>USD value</label>
+                            <input type="number" step="0.01" value={w.usdValue}
+                              onChange={e => patchWallet(w.id, { usdValue: Number(e.target.value) })}
+                              className="w-full px-2.5 py-2 rounded-lg outline-none"
+                              style={{ background: '#0A1628', border: '1px solid rgba(0,212,255,0.1)', color: '#E8F0FE', fontSize: 12, fontFamily: 'var(--font-mono)' }} />
+                          </div>
+                        </div>
+                        <button onClick={() => handleSaveWallet(w)} disabled={detailSavingKey === `wallet-${w.id}`}
+                          className="px-3 py-1.5 rounded-lg" style={{ background: 'rgba(0,212,255,0.1)', color: '#00D4FF', fontSize: 11, fontWeight: 700 }}>
+                          {detailSavingKey === `wallet-${w.id}` ? 'Saving…' : 'Save wallet'}
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Cards */}
+                {detailTab === 'cards' && (
+                  <div className="space-y-3">
+                    {detailUser.cards.length === 0 && <p style={{ fontSize: 13, color: '#5A7A9C' }}>No cards yet.</p>}
+                    {detailUser.cards.map(c => (
+                      <div key={c.id} className="p-3 rounded-xl" style={{ background: '#0D1E35', border: '1px solid rgba(0,212,255,0.08)' }}>
+                        <div className="flex items-center justify-between mb-2">
+                          <span style={{ fontSize: 12, fontWeight: 600, color: '#E8F0FE', textTransform: 'capitalize' }}>{c.type} card</span>
+                          <label className="flex items-center gap-1.5" style={{ fontSize: 11, color: '#5A7A9C' }}>
+                            <input type="checkbox" checked={c.frozen} onChange={e => patchCard(c.id, { frozen: e.target.checked })} />
+                            Frozen
+                          </label>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2 mb-2">
+                          <input value={c.holderName} onChange={e => patchCard(c.id, { holderName: e.target.value })} placeholder="Holder name"
+                            className="px-2.5 py-2 rounded-lg outline-none" style={{ background: '#0A1628', border: '1px solid rgba(0,212,255,0.1)', color: '#E8F0FE', fontSize: 12 }} />
+                          <input value={c.number} onChange={e => patchCard(c.id, { number: e.target.value })} placeholder="Card number"
+                            className="px-2.5 py-2 rounded-lg outline-none" style={{ background: '#0A1628', border: '1px solid rgba(0,212,255,0.1)', color: '#E8F0FE', fontSize: 12, fontFamily: 'var(--font-mono)' }} />
+                          <input value={c.expiry} onChange={e => patchCard(c.id, { expiry: e.target.value })} placeholder="MM/YY"
+                            className="px-2.5 py-2 rounded-lg outline-none" style={{ background: '#0A1628', border: '1px solid rgba(0,212,255,0.1)', color: '#E8F0FE', fontSize: 12, fontFamily: 'var(--font-mono)' }} />
+                          <input value={c.cvv} onChange={e => patchCard(c.id, { cvv: e.target.value })} placeholder="CVV"
+                            className="px-2.5 py-2 rounded-lg outline-none" style={{ background: '#0A1628', border: '1px solid rgba(0,212,255,0.1)', color: '#E8F0FE', fontSize: 12, fontFamily: 'var(--font-mono)' }} />
+                        </div>
+                        <div className="grid grid-cols-3 gap-2 mb-2">
+                          <div>
+                            <label style={{ fontSize: 10, color: '#5A7A9C', display: 'block', marginBottom: 3 }}>Balance</label>
+                            <input type="number" step="0.01" value={c.balance} onChange={e => patchCard(c.id, { balance: Number(e.target.value) })}
+                              className="w-full px-2.5 py-2 rounded-lg outline-none" style={{ background: '#0A1628', border: '1px solid rgba(0,212,255,0.1)', color: '#E8F0FE', fontSize: 12, fontFamily: 'var(--font-mono)' }} />
+                          </div>
+                          <div>
+                            <label style={{ fontSize: 10, color: '#5A7A9C', display: 'block', marginBottom: 3 }}>Spent</label>
+                            <input type="number" step="0.01" value={c.spent} onChange={e => patchCard(c.id, { spent: Number(e.target.value) })}
+                              className="w-full px-2.5 py-2 rounded-lg outline-none" style={{ background: '#0A1628', border: '1px solid rgba(0,212,255,0.1)', color: '#E8F0FE', fontSize: 12, fontFamily: 'var(--font-mono)' }} />
+                          </div>
+                          <div>
+                            <label style={{ fontSize: 10, color: '#5A7A9C', display: 'block', marginBottom: 3 }}>Limit</label>
+                            <input type="number" step="0.01" value={c.cardLimit} onChange={e => patchCard(c.id, { cardLimit: Number(e.target.value) })}
+                              className="w-full px-2.5 py-2 rounded-lg outline-none" style={{ background: '#0A1628', border: '1px solid rgba(0,212,255,0.1)', color: '#E8F0FE', fontSize: 12, fontFamily: 'var(--font-mono)' }} />
+                          </div>
+                        </div>
+                        <div className="flex gap-2">
+                          <button onClick={() => handleSaveCard(c)} disabled={detailSavingKey === `card-${c.id}`}
+                            className="px-3 py-1.5 rounded-lg" style={{ background: 'rgba(0,212,255,0.1)', color: '#00D4FF', fontSize: 11, fontWeight: 700 }}>
+                            {detailSavingKey === `card-${c.id}` ? 'Saving…' : 'Save card'}
+                          </button>
+                          <button onClick={() => handleDeleteCard(c)} disabled={detailSavingKey === `card-${c.id}`}
+                            className="px-3 py-1.5 rounded-lg" style={{ background: 'rgba(255,59,92,0.1)', color: '#FF3B5C', fontSize: 11, fontWeight: 700 }}>
+                            Delete card
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Transactions */}
+                {detailTab === 'transactions' && (
+                  <div className="space-y-3">
+                    {detailUser.transactions.length === 0 && <p style={{ fontSize: 13, color: '#5A7A9C' }}>No transactions yet.</p>}
+                    {detailUser.transactions.map(t => (
+                      <div key={t.id} className="p-3 rounded-xl" style={{ background: '#0D1E35', border: '1px solid rgba(0,212,255,0.08)' }}>
+                        <div style={{ fontSize: 11, color: '#5A7A9C', marginBottom: 8 }}>{new Date(t.createdAt).toLocaleString()}</div>
+                        <div className="grid grid-cols-2 gap-2 mb-2">
+                          <select value={t.type} onChange={e => patchTx(t.id, { type: e.target.value })}
+                            className="px-2.5 py-2 rounded-lg outline-none" style={{ background: '#0A1628', border: '1px solid rgba(0,212,255,0.1)', color: '#E8F0FE', fontSize: 12 }}>
+                            <option value="send">Send</option>
+                            <option value="receive">Receive</option>
+                            <option value="swap">Swap</option>
+                            <option value="stake">Stake</option>
+                            <option value="unstake">Unstake</option>
+                            <option value="earn">Earn</option>
+                          </select>
+                          <input value={t.asset} onChange={e => patchTx(t.id, { asset: e.target.value })} placeholder="Asset"
+                            className="px-2.5 py-2 rounded-lg outline-none uppercase" style={{ background: '#0A1628', border: '1px solid rgba(0,212,255,0.1)', color: '#E8F0FE', fontSize: 12, fontFamily: 'var(--font-mono)' }} />
+                        </div>
+                        <div className="grid grid-cols-3 gap-2 mb-2">
+                          <div>
+                            <label style={{ fontSize: 10, color: '#5A7A9C', display: 'block', marginBottom: 3 }}>Amount</label>
+                            <input type="number" step="0.00000001" value={t.amount} onChange={e => patchTx(t.id, { amount: Number(e.target.value) })}
+                              className="w-full px-2.5 py-2 rounded-lg outline-none" style={{ background: '#0A1628', border: '1px solid rgba(0,212,255,0.1)', color: '#E8F0FE', fontSize: 12, fontFamily: 'var(--font-mono)' }} />
+                          </div>
+                          <div>
+                            <label style={{ fontSize: 10, color: '#5A7A9C', display: 'block', marginBottom: 3 }}>USD value</label>
+                            <input type="number" step="0.01" value={t.usdValue} onChange={e => patchTx(t.id, { usdValue: Number(e.target.value) })}
+                              className="w-full px-2.5 py-2 rounded-lg outline-none" style={{ background: '#0A1628', border: '1px solid rgba(0,212,255,0.1)', color: '#E8F0FE', fontSize: 12, fontFamily: 'var(--font-mono)' }} />
+                          </div>
+                          <div>
+                            <label style={{ fontSize: 10, color: '#5A7A9C', display: 'block', marginBottom: 3 }}>Status</label>
+                            <select value={t.status} onChange={e => patchTx(t.id, { status: e.target.value })}
+                              className="w-full px-2.5 py-2 rounded-lg outline-none" style={{ background: '#0A1628', border: '1px solid rgba(0,212,255,0.1)', color: '#E8F0FE', fontSize: 12 }}>
+                              <option value="completed">Completed</option>
+                              <option value="pending">Pending</option>
+                              <option value="failed">Failed</option>
+                            </select>
+                          </div>
+                        </div>
+                        <div className="flex gap-2">
+                          <button onClick={() => handleSaveTx(t)} disabled={detailSavingKey === `tx-${t.id}`}
+                            className="px-3 py-1.5 rounded-lg" style={{ background: 'rgba(0,212,255,0.1)', color: '#00D4FF', fontSize: 11, fontWeight: 700 }}>
+                            {detailSavingKey === `tx-${t.id}` ? 'Saving…' : 'Save'}
+                          </button>
+                          <button onClick={() => handleDeleteTx(t)} disabled={detailSavingKey === `tx-${t.id}`}
+                            className="px-3 py-1.5 rounded-lg" style={{ background: 'rgba(255,59,92,0.1)', color: '#FF3B5C', fontSize: 11, fontWeight: 700 }}>
+                            Delete
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
           </motion.div>
         </div>
       )}

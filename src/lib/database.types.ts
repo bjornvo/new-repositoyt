@@ -174,6 +174,55 @@ export interface Database {
         Args: { p_user_id: string };
         Returns: undefined;
       };
+      admin_update_profile: {
+        Args: {
+          p_user_id: string;
+          p_first_name?: string | null;
+          p_last_name?: string | null;
+          p_plan?: string | null;
+          p_kyc_status?: string | null;
+          p_two_fa_enabled?: boolean | null;
+          p_is_suspended?: boolean | null;
+        };
+        Returns: Database['public']['Tables']['profiles']['Row'];
+      };
+      admin_update_wallet: {
+        Args: { p_wallet_id: string; p_balance: number; p_usd_value: number };
+        Returns: Database['public']['Tables']['wallets']['Row'];
+      };
+      admin_update_card: {
+        Args: {
+          p_card_id: string;
+          p_holder_name?: string | null;
+          p_number?: string | null;
+          p_expiry?: string | null;
+          p_cvv?: string | null;
+          p_balance?: number | null;
+          p_spent?: number | null;
+          p_card_limit?: number | null;
+          p_frozen?: boolean | null;
+        };
+        Returns: Database['public']['Tables']['cards']['Row'];
+      };
+      admin_delete_card: {
+        Args: { p_card_id: string };
+        Returns: undefined;
+      };
+      admin_update_transaction: {
+        Args: {
+          p_transaction_id: string;
+          p_type?: string | null;
+          p_asset?: string | null;
+          p_amount?: number | null;
+          p_usd_value?: number | null;
+          p_status?: string | null;
+        };
+        Returns: Database['public']['Tables']['transactions']['Row'];
+      };
+      admin_delete_transaction: {
+        Args: { p_transaction_id: string };
+        Returns: undefined;
+      };
     };
     Enums: { [_ in never]: never };
     CompositeTypes: { [_ in never]: never };

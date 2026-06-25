@@ -666,3 +666,206 @@ begin
   delete from auth.users where id = p_user_id;
 end;
 $$;
+
+-- Edit any profile field for any user (name, plan, KYC, 2FA flag, suspension).
+-- Pass null for a field to leave it unchanged.
+create or replace function public.admin_update_profile(
+  p_user_id uuid,
+  p_first_name text default null,
+  p_last_name text default null,
+  p_plan text default null,
+  p_kyc_status text default null,
+  p_two_fa_enabled boolean default null,
+  p_is_suspended boolean default null
+)
+returns public.profiles
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  p public.profiles;
+begin
+  if not public.is_admin() then
+    raise exception 'Forbidden';
+  end if;
+  if p_plan is not null and p_plan not in ('starter', 'pro', 'institutional') then
+    raise exception 'Invalid plan';
+  end if;
+  if p_kyc_status is not null and p_kyc_status not in ('pending', 'verified', 'rejected') then
+    raise exception 'Invalid KYC status';
+  end if;
+
+  update public.profiles set
+    first_name = coalesce(p_first_name, first_name),
+    last_name = coalesce(p_last_name, last_name),
+    plan = coalesce(p_plan, plan),
+    kyc_status = coalesce(p_kyc_status, kyc_status),
+    two_fa_enabled = coalesce(p_two_fa_enabled, two_fa_enabled),
+    is_suspended = coalesce(p_is_suspended, is_suspended)
+  where id = p_user_id
+  returning * into p;
+
+  if p.id is null then
+    raise exception 'User not found';
+  end if;
+  return p;
+end;
+$$;
+
+-- Directly set a wallet's balance/usd_value, for any user's wallet.
+create or replace function public.admin_update_wallet(
+  p_wallet_id uuid, p_balance numeric, p_usd_value numeric
+)
+returns public.wallets
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  w public.wallets;
+begin
+  if not public.is_admin() then
+    raise exception 'Forbidden';
+  end if;
+  if p_balance is null or p_balance < 0 or p_usd_value is null or p_usd_value < 0 then
+    raise exception 'Balance and USD value must be non-negative';
+  end if;
+
+  update public.wallets set balance = p_balance, usd_value = p_usd_value
+    where id = p_wallet_id
+    returning * into w;
+  if w.id is null then
+    raise exception 'Wallet not found';
+  end if;
+  return w;
+end;
+$$;
+
+-- Edit any card field for any user's card (number/cvv/expiry included — see
+-- the note above the cards table: this is sandbox-only demo card data).
+create or replace function public.admin_update_card(
+  p_card_id uuid,
+  p_holder_name text default null,
+  p_number text default null,
+  p_expiry text default null,
+  p_cvv text default null,
+  p_balance numeric default null,
+  p_spent numeric default null,
+  p_card_limit numeric default null,
+  p_frozen boolean default null
+)
+returns public.cards
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  c public.cards;
+begin
+  if not public.is_admin() then
+    raise exception 'Forbidden';
+  end if;
+  if p_balance is not null and p_balance < 0 then
+    raise exception 'Balance must be non-negative';
+  end if;
+  if p_spent is not null and p_spent < 0 then
+    raise exception 'Spent must be non-negative';
+  end if;
+  if p_card_limit is not null and p_card_limit < 0 then
+    raise exception 'Limit must be non-negative';
+  end if;
+
+  update public.cards set
+    holder_name = coalesce(p_holder_name, holder_name),
+    number = coalesce(p_number, number),
+    expiry = coalesce(p_expiry, expiry),
+    cvv = coalesce(p_cvv, cvv),
+    balance = coalesce(p_balance, balance),
+    spent = coalesce(p_spent, spent),
+    card_limit = coalesce(p_card_limit, card_limit),
+    frozen = coalesce(p_frozen, frozen)
+  where id = p_card_id
+  returning * into c;
+
+  if c.id is null then
+    raise exception 'Card not found';
+  end if;
+  return c;
+end;
+$$;
+
+-- Delete any user's card outright.
+create or replace function public.admin_delete_card(p_card_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if not public.is_admin() then
+    raise exception 'Forbidden';
+  end if;
+  delete from public.cards where id = p_card_id;
+end;
+$$;
+
+-- Edit an existing transaction record for any user (does not touch wallet
+-- balances — use admin_update_wallet separately if the balance should change
+-- to match).
+create or replace function public.admin_update_transaction(
+  p_transaction_id uuid,
+  p_type text default null,
+  p_asset text default null,
+  p_amount numeric default null,
+  p_usd_value numeric default null,
+  p_status text default null
+)
+returns public.transactions
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  tx public.transactions;
+begin
+  if not public.is_admin() then
+    raise exception 'Forbidden';
+  end if;
+  if p_type is not null and p_type not in ('send','receive','swap','stake','unstake','earn') then
+    raise exception 'Invalid transaction type';
+  end if;
+  if p_status is not null and p_status not in ('completed','pending','failed') then
+    raise exception 'Invalid status';
+  end if;
+
+  update public.transactions set
+    type = coalesce(p_type, type),
+    asset = coalesce(p_asset, asset),
+    amount = coalesce(p_amount, amount),
+    usd_value = coalesce(p_usd_value, usd_value),
+    status = coalesce(p_status, status)
+  where id = p_transaction_id
+  returning * into tx;
+
+  if tx.id is null then
+    raise exception 'Transaction not found';
+  end if;
+  return tx;
+end;
+$$;
+
+-- Delete a transaction record outright (does not touch wallet balances).
+create or replace function public.admin_delete_transaction(p_transaction_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if not public.is_admin() then
+    raise exception 'Forbidden';
+  end if;
+  delete from public.transactions where id = p_transaction_id;
+end;
+$$;

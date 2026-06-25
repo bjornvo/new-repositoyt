@@ -54,6 +54,53 @@ export interface Announcement {
   createdAt: string;
 }
 
+export interface AdminWallet {
+  id: string;
+  chain: string;
+  symbol: string;
+  address: string;
+  balance: number;
+  usdValue: number;
+}
+
+export interface AdminCard {
+  id: string;
+  type: 'virtual' | 'physical';
+  number: string;
+  expiry: string;
+  cvv: string;
+  holderName: string;
+  balance: number;
+  spent: number;
+  cardLimit: number;
+  frozen: boolean;
+}
+
+export interface AdminUserTransaction {
+  id: string;
+  type: string;
+  asset: string;
+  amount: number;
+  usdValue: number;
+  status: string;
+  createdAt: string;
+}
+
+export interface AdminUserDetail {
+  id: string;
+  email: string;
+  firstName: string;
+  lastName: string;
+  plan: 'starter' | 'pro' | 'institutional';
+  kycStatus: 'verified' | 'pending' | 'rejected';
+  twoFaEnabled: boolean;
+  isSuspended: boolean;
+  createdAt: string;
+  wallets: AdminWallet[];
+  cards: AdminCard[];
+  transactions: AdminUserTransaction[];
+}
+
 const MOCK_STATS: AdminStats = {
   totalUsers: 24831,
   activeUsers: 8421,
@@ -426,6 +473,126 @@ export async function deleteUser(userId: string): Promise<void> {
     return;
   }
   const { error } = await supabase.rpc('admin_delete_user', { p_user_id: userId });
+  if (error) throw new Error(error.message);
+}
+
+// ── Full user editing (profile, wallets, cards, transactions) ──────────────────
+
+const MOCK_DETAIL_CACHE = new Map<string, AdminUserDetail>();
+
+function mockDetailFor(u: AdminUser): AdminUserDetail {
+  const existing = MOCK_DETAIL_CACHE.get(u.id);
+  if (existing) return existing;
+  const detail: AdminUserDetail = {
+    id: u.id, email: u.email, firstName: u.firstName, lastName: u.lastName,
+    plan: u.plan as AdminUserDetail['plan'], kycStatus: u.kycStatus, twoFaEnabled: false,
+    isSuspended: u.isSuspended, createdAt: u.createdAt,
+    wallets: [{ id: `${u.id}-w1`, chain: 'BTC', symbol: 'BTC', address: 'internal', balance: 0.05, usdValue: u.balanceUsd }],
+    cards: [{ id: `${u.id}-c1`, type: 'virtual', number: '4242 4242 4242 4242', expiry: '12/29', cvv: '123', holderName: `${u.firstName} ${u.lastName}`, balance: 250, spent: 40, cardLimit: 5000, frozen: false }],
+    transactions: [],
+  };
+  MOCK_DETAIL_CACHE.set(u.id, detail);
+  return detail;
+}
+
+/** Fetches everything editable about one user: profile, wallets, cards, and their transaction log. */
+export async function getUserDetail(userId: string): Promise<AdminUserDetail> {
+  if (!isSupabaseConfigured || !supabase) {
+    const u = MOCK_USERS.find(m => m.id === userId);
+    if (!u) throw new Error('User not found');
+    return mockDetailFor(u);
+  }
+
+  const [{ data: profile, error: profileErr }, { data: wallets }, { data: cards }, { data: txs }] = await Promise.all([
+    supabase.from('profiles').select('*').eq('id', userId).single(),
+    supabase.from('wallets').select('*').eq('user_id', userId).order('usd_value', { ascending: false }),
+    supabase.from('cards').select('*').eq('user_id', userId).order('created_at', { ascending: false }),
+    supabase.from('transactions').select('*').eq('user_id', userId).order('created_at', { ascending: false }).limit(100),
+  ]);
+  if (profileErr) throw new Error(profileErr.message);
+
+  return {
+    id: profile.id, email: profile.email, firstName: profile.first_name ?? '', lastName: profile.last_name ?? '',
+    plan: profile.plan, kycStatus: profile.kyc_status, twoFaEnabled: profile.two_fa_enabled, isSuspended: profile.is_suspended,
+    createdAt: profile.created_at,
+    wallets: (wallets ?? []).map(w => ({ id: w.id, chain: w.chain, symbol: w.symbol, address: w.address, balance: Number(w.balance), usdValue: Number(w.usd_value) })),
+    cards: (cards ?? []).map(c => ({ id: c.id, type: c.type, number: c.number, expiry: c.expiry, cvv: c.cvv, holderName: c.holder_name, balance: Number(c.balance), spent: Number(c.spent), cardLimit: Number(c.card_limit), frozen: c.frozen })),
+    transactions: (txs ?? []).map(t => ({ id: t.id, type: t.type, asset: t.asset, amount: Number(t.amount), usdValue: Number(t.usd_value), status: t.status, createdAt: t.created_at })),
+  };
+}
+
+/** Edits any profile field — name, plan, KYC status, 2FA flag, suspension. */
+export async function updateUserProfile(userId: string, fields: {
+  firstName?: string; lastName?: string; plan?: 'starter' | 'pro' | 'institutional';
+  kycStatus?: 'verified' | 'pending' | 'rejected'; twoFaEnabled?: boolean; isSuspended?: boolean;
+}): Promise<void> {
+  if (!isSupabaseConfigured || !supabase) { await delay(300); return; }
+  const { error } = await supabase.rpc('admin_update_profile', {
+    p_user_id: userId,
+    p_first_name: fields.firstName ?? null,
+    p_last_name: fields.lastName ?? null,
+    p_plan: fields.plan ?? null,
+    p_kyc_status: fields.kycStatus ?? null,
+    p_two_fa_enabled: fields.twoFaEnabled ?? null,
+    p_is_suspended: fields.isSuspended ?? null,
+  });
+  if (error) throw new Error(error.message);
+}
+
+/** Directly sets a wallet's balance and USD value. */
+export async function updateWallet(walletId: string, balance: number, usdValue: number): Promise<void> {
+  if (!isSupabaseConfigured || !supabase) { await delay(300); return; }
+  if (!Number.isFinite(balance) || balance < 0 || !Number.isFinite(usdValue) || usdValue < 0) {
+    throw new Error('Balance and USD value must be non-negative');
+  }
+  const { error } = await supabase.rpc('admin_update_wallet', { p_wallet_id: walletId, p_balance: balance, p_usd_value: usdValue });
+  if (error) throw new Error(error.message);
+}
+
+/** Edits any card field, including the PAN/CVV/expiry (sandbox demo card data — see schema.sql). */
+export async function updateCard(cardId: string, fields: Partial<{
+  holderName: string; number: string; expiry: string; cvv: string; balance: number; spent: number; cardLimit: number; frozen: boolean;
+}>): Promise<void> {
+  if (!isSupabaseConfigured || !supabase) { await delay(300); return; }
+  const { error } = await supabase.rpc('admin_update_card', {
+    p_card_id: cardId,
+    p_holder_name: fields.holderName ?? null,
+    p_number: fields.number ?? null,
+    p_expiry: fields.expiry ?? null,
+    p_cvv: fields.cvv ?? null,
+    p_balance: fields.balance ?? null,
+    p_spent: fields.spent ?? null,
+    p_card_limit: fields.cardLimit ?? null,
+    p_frozen: fields.frozen ?? null,
+  });
+  if (error) throw new Error(error.message);
+}
+
+export async function deleteCard(cardId: string): Promise<void> {
+  if (!isSupabaseConfigured || !supabase) { await delay(300); return; }
+  const { error } = await supabase.rpc('admin_delete_card', { p_card_id: cardId });
+  if (error) throw new Error(error.message);
+}
+
+/** Edits an existing transaction row directly (type, asset, amount, USD value, status). */
+export async function updateTransaction(transactionId: string, fields: Partial<{
+  type: string; asset: string; amount: number; usdValue: number; status: string;
+}>): Promise<void> {
+  if (!isSupabaseConfigured || !supabase) { await delay(300); return; }
+  const { error } = await supabase.rpc('admin_update_transaction', {
+    p_transaction_id: transactionId,
+    p_type: fields.type ?? null,
+    p_asset: fields.asset ?? null,
+    p_amount: fields.amount ?? null,
+    p_usd_value: fields.usdValue ?? null,
+    p_status: fields.status ?? null,
+  });
+  if (error) throw new Error(error.message);
+}
+
+export async function deleteTransaction(transactionId: string): Promise<void> {
+  if (!isSupabaseConfigured || !supabase) { await delay(300); return; }
+  const { error } = await supabase.rpc('admin_delete_transaction', { p_transaction_id: transactionId });
   if (error) throw new Error(error.message);
 }
 
