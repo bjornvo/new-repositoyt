@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router';
 import { ArrowRight, Play, TrendingUp } from 'lucide-react';
 import { useLang } from '../../i18n/LangContext';
 import { AreaChart, Area, ResponsiveContainer, Tooltip } from 'recharts';
+import { CryptoIcon } from '../common/CryptoIcon';
 
 const chartData = [
   { v: 38200 }, { v: 41500 }, { v: 39800 }, { v: 44100 }, { v: 42600 },
@@ -225,9 +226,7 @@ export function Hero() {
               ].map(a => (
                 <div key={a.coin} className="flex items-center justify-between py-2 px-3 rounded-xl" style={{ background: 'rgba(255,255,255,0.03)' }}>
                   <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 rounded-full flex items-center justify-center" style={{ background: `${a.color}22` }}>
-                      <span style={{ fontSize: 10, fontWeight: 700, color: a.color }}>{a.coin}</span>
-                    </div>
+                    <CryptoIcon symbol={a.coin} color={a.color} size={32} />
                     <div>
                       <div style={{ fontSize: 13, fontWeight: 600, color: '#E8F0FE' }}>{a.name}</div>
                       <div style={{ fontSize: 11, color: '#5A7A9C', fontFamily: 'var(--font-mono)' }}>{a.amount} {a.coin}</div>
@@ -260,9 +259,7 @@ export function Hero() {
               }}
             >
               <div className="flex items-center gap-2">
-                <div className="w-6 h-6 rounded-full" style={{ background: coin.color + '33', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <span style={{ fontSize: 8, fontWeight: 700, color: coin.color }}>{coin.symbol[0]}</span>
-                </div>
+                <CryptoIcon symbol={coin.symbol} color={coin.color} size={24} />
                 <div>
                   <div style={{ fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 600, color: '#E8F0FE' }}>{coin.price}</div>
                   <div style={{ fontSize: 10, color: '#00C896' }}>{coin.change}</div>

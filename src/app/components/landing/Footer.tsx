@@ -15,9 +15,7 @@ export function Footer() {
         <div className="grid md:grid-cols-4 gap-12 mb-12">
           <div>
             <div className="flex items-center gap-2 mb-4">
-              <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: 'linear-gradient(135deg, #00D4FF, #0066FF)' }}>
-                <span style={{ fontFamily: 'var(--font-mono)', color: '#050B14', fontSize: 12, fontWeight: 700 }}>N</span>
-              </div>
+              <img src="/logo.png" alt="NovaCrypt" className="w-7 h-7 rounded-lg" />
               <span style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 16, color: '#E8F0FE' }}>
                 Nova<span style={{ color: '#00D4FF' }}>Crypt</span>
               </span>

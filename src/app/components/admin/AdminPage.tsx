@@ -491,9 +491,7 @@ export function AdminPage() {
       <div className="w-56 shrink-0 flex flex-col sticky top-0 h-screen" style={{ background: '#070F1C', borderRight: '1px solid rgba(240,180,41,0.1)' }}>
         {/* Logo */}
         <div className="px-5 py-5 flex items-center gap-2.5" style={{ borderBottom: '1px solid rgba(240,180,41,0.08)' }}>
-          <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: 'linear-gradient(135deg, #F0B429, #FF8C00)' }}>
-            <Shield size={14} style={{ color: '#050B14' }} />
-          </div>
+          <img src="/logo.png" alt="NovaCrypt" className="w-7 h-7 rounded-lg" />
           <div>
             <div style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 14, color: '#E8F0FE' }}>
               Nova<span style={{ color: '#F0B429' }}>Crypt</span>

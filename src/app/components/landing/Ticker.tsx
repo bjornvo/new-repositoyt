@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useLang } from '../../i18n/LangContext';
+import { CryptoIcon } from '../common/CryptoIcon';
 
 const COINS = [
   { symbol: 'BTC', price: 67842.50, change: 2.43 },
@@ -67,6 +68,7 @@ export function Ticker() {
       >
         {items.map((coin, i) => (
           <div key={i} className="flex items-center gap-2 whitespace-nowrap">
+            <CryptoIcon symbol={coin.symbol} size={18} />
             <span style={{ fontFamily: 'var(--font-mono)', fontSize: 13, fontWeight: 600, color: '#E8F0FE' }}>
               {coin.symbol}
             </span>

@@ -4,6 +4,7 @@ import { useLang } from '../../i18n/LangContext';
 import { useAuth } from '../../context/AuthContext';
 import { getPortfolio, type WalletBalance } from '../../../services/portfolio';
 import { sendFunds } from '../../../services/wallet';
+import { CryptoIcon } from '../common/CryptoIcon';
 
 const COIN_COLORS: Record<string, string> = {
   BTC: '#F7931A', ETH: '#627EEA', SOL: '#9945FF', MATIC: '#8247E5', USDC: '#2775CA',
@@ -89,9 +90,7 @@ export function Wallet() {
                 color: selected === i ? '#00D4FF' : '#5A7A9C',
               }}
             >
-              <div className="w-5 h-5 rounded-full flex items-center justify-center" style={{ background: color + '22' }}>
-                <span style={{ fontSize: 8, fontWeight: 700, color }}>{w.symbol[0]}</span>
-              </div>
+              <CryptoIcon symbol={w.symbol} color={color} size={20} />
               <span style={{ fontSize: 13, fontWeight: 600 }}>{w.symbol}</span>
             </button>
           );
@@ -117,9 +116,7 @@ export function Wallet() {
         <div className="flex flex-col sm:flex-row sm:items-start gap-6">
           <div className="flex-1">
             <div className="flex items-center gap-3 mb-4">
-              <div className="w-12 h-12 rounded-2xl flex items-center justify-center" style={{ background: (COIN_COLORS[wallet.symbol] ?? '#00D4FF') + '22' }}>
-                <span style={{ fontSize: 16, fontWeight: 800, color: COIN_COLORS[wallet.symbol] ?? '#00D4FF' }}>{wallet.symbol[0]}</span>
-              </div>
+              <CryptoIcon symbol={wallet.symbol} color={COIN_COLORS[wallet.symbol] ?? '#00D4FF'} size={48} />
               <div>
                 <div style={{ fontSize: 16, fontWeight: 700, color: '#E8F0FE' }}>{wallet.chain}</div>
                 <div className="inline-flex px-2 py-0.5 rounded" style={{ background: 'rgba(0,212,255,0.08)', fontSize: 11, color: '#5A7A9C', fontFamily: 'var(--font-mono)' }}>
@@ -238,9 +235,7 @@ export function Wallet() {
               onMouseEnter={e => e.currentTarget.style.background = 'rgba(0,212,255,0.03)'}
               onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
             >
-              <div className="w-8 h-8 rounded-full flex items-center justify-center" style={{ background: color + '1A' }}>
-                <span style={{ fontSize: 9, fontWeight: 700, color }}>{w.symbol.slice(0, 3)}</span>
-              </div>
+              <CryptoIcon symbol={w.symbol} color={color} size={32} />
               <div className="flex-1">
                 <div style={{ fontSize: 13, fontWeight: 600, color: '#E8F0FE' }}>{w.chain}</div>
                 <div style={{ fontSize: 11, color: '#5A7A9C', fontFamily: 'var(--font-mono)' }}>{w.balance.toLocaleString('en', { maximumFractionDigits: 6 })} {w.symbol}</div>

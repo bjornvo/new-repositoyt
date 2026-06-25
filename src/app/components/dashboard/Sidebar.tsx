@@ -38,9 +38,7 @@ export function Sidebar({ mobileOpen, setMobileOpen }: Props) {
       {/* Logo */}
       <div className="flex items-center justify-between px-5 py-5" style={{ borderBottom: '1px solid rgba(0,212,255,0.08)' }}>
         <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: 'linear-gradient(135deg, #00D4FF, #0066FF)' }}>
-            <span style={{ fontFamily: 'var(--font-mono)', color: '#050B14', fontSize: 13, fontWeight: 700 }}>N</span>
-          </div>
+          <img src="/logo.png" alt="NovaCrypt" className="w-8 h-8 rounded-lg" />
           <span style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 17, color: '#E8F0FE' }}>
             Nova<span style={{ color: '#00D4FF' }}>Crypt</span>
           </span>

@@ -6,6 +6,7 @@ import { LineChart, Line, ResponsiveContainer, Tooltip, XAxis } from 'recharts';
 import { getMarketPrices, type MarketPrice } from '../../../services/market';
 import { swapAssets } from '../../../services/exchange';
 import { getPortfolio, type WalletBalance } from '../../../services/portfolio';
+import { CryptoIcon } from '../common/CryptoIcon';
 
 const chartData = [
   { t: '00:00', p: 67100 }, { t: '04:00', p: 67450 }, { t: '08:00', p: 66900 },
@@ -88,7 +89,7 @@ export function Exchange() {
                     className="flex items-center gap-2 px-3 py-1.5 rounded-lg"
                     style={{ background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(0,212,255,0.1)' }}
                   >
-                    <div className="w-5 h-5 rounded-full" style={{ background: fromCoin.color + '33' }} />
+                    <CryptoIcon symbol={fromCoin.symbol} color={fromCoin.color} size={20} />
                     <span style={{ fontSize: 13, fontWeight: 700, color: '#E8F0FE' }}>{fromCoin.symbol}</span>
                     <ChevronDown size={12} style={{ color: '#5A7A9C' }} />
                   </button>
@@ -101,7 +102,7 @@ export function Exchange() {
                           onMouseEnter={e => e.currentTarget.style.background = 'rgba(0,212,255,0.06)'}
                           onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
                         >
-                          <div className="w-5 h-5 rounded-full" style={{ background: c.color + '33' }} />
+                          <CryptoIcon symbol={c.symbol} color={c.color} size={20} />
                           <span style={{ fontWeight: 600 }}>{c.symbol}</span>
                           <span style={{ color: '#5A7A9C', fontSize: 11 }}>{c.name}</span>
                         </button>
@@ -148,7 +149,7 @@ export function Exchange() {
                     className="flex items-center gap-2 px-3 py-1.5 rounded-lg"
                     style={{ background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(0,212,255,0.1)' }}
                   >
-                    <div className="w-5 h-5 rounded-full" style={{ background: toCoin.color + '33' }} />
+                    <CryptoIcon symbol={toCoin.symbol} color={toCoin.color} size={20} />
                     <span style={{ fontSize: 13, fontWeight: 700, color: '#E8F0FE' }}>{toCoin.symbol}</span>
                     <ChevronDown size={12} style={{ color: '#5A7A9C' }} />
                   </button>
@@ -161,7 +162,7 @@ export function Exchange() {
                           onMouseEnter={e => e.currentTarget.style.background = 'rgba(0,212,255,0.06)'}
                           onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
                         >
-                          <div className="w-5 h-5 rounded-full" style={{ background: c.color + '33' }} />
+                          <CryptoIcon symbol={c.symbol} color={c.color} size={20} />
                           <span style={{ fontWeight: 600 }}>{c.symbol}</span>
                           <span style={{ color: '#5A7A9C', fontSize: 11 }}>{c.name}</span>
                         </button>

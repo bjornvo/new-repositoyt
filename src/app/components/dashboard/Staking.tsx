@@ -5,6 +5,7 @@ import { BarChart, Bar, ResponsiveContainer, Tooltip, XAxis } from 'recharts';
 import { useAuth } from '../../context/AuthContext';
 import { getStakes, stakeAsset, unstakeAsset, STAKING_POOLS, type Stake } from '../../../services/staking';
 import { getMarketPrices, type MarketPrice } from '../../../services/market';
+import { CryptoIcon } from '../common/CryptoIcon';
 
 const rewardsChart = [
   { month: 'Jan', earn: 120 }, { month: 'Feb', earn: 145 }, { month: 'Mar', earn: 189 },
@@ -110,9 +111,7 @@ export function Staking() {
             <div key={stake.id} style={{ borderBottom: i < activeStakes.length - 1 ? '1px solid rgba(0,212,255,0.04)' : 'none' }}>
               <div className="flex flex-wrap items-center gap-4 px-5 py-4">
                 <div className="flex items-center gap-3 flex-1 min-w-0">
-                  <div className="w-9 h-9 rounded-full flex items-center justify-center" style={{ background: (pool?.color ?? '#00D4FF') + '22' }}>
-                    <span style={{ fontSize: 12, fontWeight: 800, color: pool?.color ?? '#00D4FF' }}>{stake.asset[0]}</span>
-                  </div>
+                  <CryptoIcon symbol={stake.asset} color={pool?.color ?? '#00D4FF'} size={36} />
                   <div>
                     <div style={{ fontSize: 14, fontWeight: 600, color: '#E8F0FE' }}>{stake.asset}</div>
                     <div style={{ fontSize: 11, color: '#5A7A9C' }}>
@@ -178,9 +177,7 @@ export function Staking() {
                 onMouseEnter={e => e.currentTarget.style.background = 'rgba(0,212,255,0.02)'}
                 onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
               >
-                <div className="w-7 h-7 rounded-full flex items-center justify-center" style={{ background: pool.color + '22' }}>
-                  <span style={{ fontSize: 9, fontWeight: 700, color: pool.color }}>{pool.asset[0]}</span>
-                </div>
+                <CryptoIcon symbol={pool.asset} color={pool.color} size={28} />
                 <div className="flex-1">
                   <div style={{ fontSize: 13, fontWeight: 600, color: '#E8F0FE' }}>{pool.asset} Pool</div>
                   <div style={{ fontSize: 11, color: '#5A7A9C' }}>

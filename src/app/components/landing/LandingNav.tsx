@@ -37,12 +37,7 @@ export function LandingNav() {
       <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
         {/* Logo */}
         <div className="flex items-center gap-3 cursor-pointer">
-          <div className="relative w-8 h-8">
-            <div className="absolute inset-0 rounded-lg" style={{ background: 'linear-gradient(135deg, #00D4FF, #0066FF)' }} />
-            <div className="absolute inset-0 flex items-center justify-center">
-              <span style={{ fontFamily: 'var(--font-mono)', color: '#050B14', fontSize: 13, fontWeight: 700 }}>N</span>
-            </div>
-          </div>
+          <img src="/logo.png" alt="NovaCrypt" className="w-8 h-8 rounded-lg" />
           <span style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 18, color: '#E8F0FE', letterSpacing: -0.3 }}>
             Nova<span style={{ color: '#00D4FF' }}>Crypt</span>
           </span>

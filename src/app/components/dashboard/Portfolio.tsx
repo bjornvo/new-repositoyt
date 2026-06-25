@@ -4,6 +4,7 @@ import { AreaChart, Area, PieChart, Pie, Cell, ResponsiveContainer, Tooltip, XAx
 import { useLang } from '../../i18n/LangContext';
 import { useAuth } from '../../context/AuthContext';
 import { getPortfolio, type PortfolioSnapshot } from '../../../services/portfolio';
+import { CryptoIcon } from '../common/CryptoIcon';
 
 const portfolioHistory = [
   { date: 'Jan', v: 42000 }, { date: 'Feb', v: 38500 }, { date: 'Mar', v: 51000 },
@@ -142,9 +143,7 @@ export function Portfolio() {
             {ASSETS.map((a) => (
               <div key={a.coin} className="flex items-center justify-between px-5 py-3">
                 <div className="flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-full flex items-center justify-center" style={{ background: a.color + '1A' }}>
-                    <span style={{ fontSize: 10, fontWeight: 700, color: a.color }}>{a.coin.slice(0, 3)}</span>
-                  </div>
+                  <CryptoIcon symbol={a.coin} color={a.color} size={36} />
                   <div>
                     <div style={{ fontSize: 14, fontWeight: 600, color: '#E8F0FE' }}>{a.name}</div>
                     <div style={{ fontSize: 11, color: '#5A7A9C', fontFamily: 'var(--font-mono)' }}>{a.amount !== '—' ? `${a.amount} ${a.coin}` : a.coin}</div>
