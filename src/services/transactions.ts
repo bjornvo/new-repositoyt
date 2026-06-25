@@ -2,7 +2,8 @@ import { supabase, isSupabaseConfigured } from '../lib/supabase';
 
 export interface Transaction {
   id: string;
-  type: 'send' | 'receive' | 'swap' | 'stake' | 'unstake' | 'earn';
+  type: 'send' | 'receive' | 'swap' | 'stake' | 'unstake' | 'earn'
+    | 'card_topup' | 'card_spend' | 'card_refund' | 'card_fee' | 'card_adjustment';
   asset: string;
   amount: number;
   usdValue: number;
@@ -45,6 +46,24 @@ export async function getTransactions(userId: string, limit = 50): Promise<Trans
       status: r.status, fromAddress: r.from_address, toAddress: r.to_address,
       txHash: r.tx_hash, fee: r.fee, createdAt: r.created_at,
     }));
+}
+
+export async function getCardTransactions(cardId: string, limit = 20): Promise<Transaction[]> {
+  if (!isSupabaseConfigured || !supabase) return [];
+
+  const { data, error } = await supabase
+    .from('transactions')
+    .select('*')
+    .eq('card_id', cardId)
+    .order('created_at', { ascending: false })
+    .limit(limit);
+  if (error) throw new Error(error.message);
+
+  return (data ?? []).map(r => ({
+    id: r.id, type: r.type as Transaction['type'], asset: r.asset, amount: r.amount, usdValue: r.usd_value,
+    status: r.status, fromAddress: r.from_address, toAddress: r.to_address,
+    txHash: r.tx_hash, fee: r.fee, createdAt: r.created_at,
+  }));
 }
 
 export async function createTransaction(userId: string, tx: Omit<Transaction, 'id' | 'createdAt'>): Promise<Transaction> {

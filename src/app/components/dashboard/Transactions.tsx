@@ -20,19 +20,6 @@ interface Tx {
   to?: string;
 }
 
-const TRANSACTIONS: Tx[] = [
-  { id: '1', type: 'receive', asset: 'BTC', amount: '+0.1420 BTC', usd: '+$9,635', status: 'completed', date: '2026-06-10 14:23', hash: '3c7c4d...f82b1a' },
-  { id: '2', type: 'swap', asset: 'ETH → BTC', amount: '1.500 ETH', usd: '$5,282', status: 'completed', date: '2026-06-10 11:05', hash: '8fa3e1...c291d4' },
-  { id: '3', type: 'send', asset: 'USDT', amount: '-2,500 USDT', usd: '-$2,500', status: 'completed', date: '2026-06-09 18:44', hash: '1b9f2c...a478e3' },
-  { id: '4', type: 'stake', asset: 'ETH', amount: '2.000 ETH', usd: '$7,042', status: 'completed', date: '2026-06-09 09:12', hash: 'd84a1f...b39c72' },
-  { id: '5', type: 'buy', asset: 'SOL', amount: '+10.00 SOL', usd: '+$1,824', status: 'completed', date: '2026-06-08 21:30', hash: '7e2b5a...8f4d91' },
-  { id: '6', type: 'receive', asset: 'ETH', amount: '+0.500 ETH', usd: '+$1,761', status: 'completed', date: '2026-06-08 15:18', hash: '4c8d3e...2a5b67' },
-  { id: '7', type: 'send', asset: 'BTC', amount: '-0.050 BTC', usd: '-$3,392', status: 'pending', date: '2026-06-08 10:55', hash: '9a1c4f...7e3d82' },
-  { id: '8', type: 'swap', asset: 'BNB → ETH', amount: '5.000 BNB', usd: '$3,062', status: 'completed', date: '2026-06-07 19:42', hash: '2f7b8c...5d1a39' },
-  { id: '9', type: 'unstake', asset: 'SOL', amount: '+5.000 SOL', usd: '+$912', status: 'failed', date: '2026-06-07 08:20', hash: 'b3d9e4...6c2f71' },
-  { id: '10', type: 'buy', asset: 'BTC', amount: '+0.075 BTC', usd: '+$5,088', status: 'completed', date: '2026-06-06 17:33', hash: '5e8a2d...9b4c16' },
-];
-
 const TYPE_COLORS: Record<TxType, { bg: string; color: string; label: string }> = {
   receive: { bg: 'rgba(0,200,150,0.1)', color: '#00C896', label: 'Receive' },
   send: { bg: 'rgba(255,59,92,0.1)', color: '#FF3B5C', label: 'Send' },
@@ -53,27 +40,36 @@ export function Transactions() {
   const { user } = useAuth();
   const d = t.dashboard.transactions;
   const [filter, setFilter] = useState<TxType | 'all'>('all');
-  const [txList, setTxList] = useState<Tx[]>(TRANSACTIONS);
+  const [txList, setTxList] = useState<Tx[]>([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     getTransactions(user?.id ?? 'guest').then(data => {
-      const mapped: Tx[] = data.map((tx: Transaction) => ({
-        id: tx.id,
-        type: (tx.type === 'earn' ? 'receive' : tx.type) as TxType,
-        asset: tx.asset,
-        amount: `${tx.type === 'receive' || tx.type === 'earn' ? '+' : tx.type === 'send' ? '-' : ''}${tx.amount} ${tx.asset.split('→')[0]}`,
-        usd: `${tx.type === 'receive' || tx.type === 'earn' ? '+' : tx.type === 'send' ? '-' : ''}$${tx.usdValue.toLocaleString('en', { maximumFractionDigits: 0 })}`,
-        status: tx.status,
-        date: new Date(tx.createdAt).toLocaleString('en', { dateStyle: 'short', timeStyle: 'short' }),
-        hash: tx.txHash ?? `${tx.id.slice(0, 6)}...`,
-        from: tx.fromAddress ?? undefined,
-        to: tx.toAddress ?? undefined,
-      }));
+      const walletTypes: Transaction['type'][] = ['send', 'receive', 'swap', 'stake', 'unstake', 'earn'];
+      const mapped: Tx[] = data
+        .filter(tx => walletTypes.includes(tx.type))
+        .map((tx) => ({
+          id: tx.id,
+          type: (tx.type === 'earn' ? 'receive' : tx.type) as TxType,
+          asset: tx.asset,
+          amount: `${tx.type === 'receive' || tx.type === 'earn' ? '+' : tx.type === 'send' ? '-' : ''}${tx.amount} ${tx.asset.split('→')[0]}`,
+          usd: `${tx.type === 'receive' || tx.type === 'earn' ? '+' : tx.type === 'send' ? '-' : ''}$${tx.usdValue.toLocaleString('en', { maximumFractionDigits: 0 })}`,
+          status: tx.status,
+          date: new Date(tx.createdAt).toLocaleString('en', { dateStyle: 'short', timeStyle: 'short' }),
+          hash: tx.txHash ?? `${tx.id.slice(0, 6)}...`,
+          from: tx.fromAddress ?? undefined,
+          to: tx.toAddress ?? undefined,
+        }));
       setTxList(mapped);
+      setLoading(false);
     });
   }, [user?.id]);
 
   const filtered = filter === 'all' ? txList : txList.filter(tx => tx.type === filter);
+
+  if (loading) {
+    return <div style={{ color: '#5A7A9C', fontSize: 13 }}>Loading transactions…</div>;
+  }
 
   return (
     <div className="space-y-4">
@@ -130,6 +126,10 @@ export function Transactions() {
           <span className="text-right">{d.date}</span>
           <span className="text-right">{d.hash}</span>
         </div>
+
+        {filtered.length === 0 && (
+          <div className="px-5 py-6 text-center" style={{ color: '#5A7A9C', fontSize: 13 }}>No transactions yet.</div>
+        )}
 
         {/* Rows */}
         {filtered.map((tx, i) => {

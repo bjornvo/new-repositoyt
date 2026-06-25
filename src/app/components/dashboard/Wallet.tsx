@@ -203,7 +203,7 @@ export function Wallet() {
               />
             </div>
             <div className="flex items-center justify-between" style={{ fontSize: 12, color: '#5A7A9C' }}>
-              <span>Network fee: ~$2.40</span>
+              <span>Network fee: ~${(parseFloat(sendAmount || '0') * (wallet.usdValue / (wallet.balance || 1)) * 0.005).toFixed(2)} (0.5%)</span>
               <span>Available: {wallet.balance.toLocaleString('en', { maximumFractionDigits: 6 })} {wallet.symbol}</span>
             </div>
             {sendError && <p style={{ fontSize: 12, color: '#FF3B5C' }}>{sendError}</p>}

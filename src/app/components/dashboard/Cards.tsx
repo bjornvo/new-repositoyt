@@ -4,6 +4,11 @@ import { useLang } from '../../i18n/LangContext';
 import { useAuth } from '../../context/AuthContext';
 import { getCards, issueCard, toggleCardFreeze, topUpCard, type Card } from '../../../services/cards';
 import { getPortfolio, type WalletBalance } from '../../../services/portfolio';
+import { getCardTransactions, type Transaction } from '../../../services/transactions';
+
+const CARD_TX_LABELS: Record<string, string> = {
+  card_topup: 'Top-up', card_spend: 'Purchase', card_refund: 'Refund', card_fee: 'Fee', card_adjustment: 'Adjustment',
+};
 
 const CARD_GRADIENTS = {
   virtual: 'linear-gradient(135deg, #0066FF 0%, #00D4FF 100%)',
@@ -16,6 +21,7 @@ export function Cards() {
   const d = t.dashboard.cards;
   const [cards, setCards] = useState<Card[]>([]);
   const [wallets, setWallets] = useState<WalletBalance[]>([]);
+  const [cardTxs, setCardTxs] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
   const [showNumber, setShowNumber] = useState(false);
   const [activeCard, setActiveCard] = useState(0);
@@ -37,6 +43,11 @@ export function Cards() {
   useEffect(refresh, [user?.id]);
 
   const card = cards[activeCard];
+
+  useEffect(() => {
+    if (!card) { setCardTxs([]); return; }
+    getCardTransactions(card.id).then(setCardTxs);
+  }, [card?.id]);
 
   const handleFreeze = async () => {
     if (!card) return;
@@ -62,6 +73,7 @@ export function Cards() {
       setTopUpOpen(false);
       setTopUpAmount('');
       refresh();
+      getCardTransactions(card.id).then(setCardTxs);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Top-up failed.');
     } finally {
@@ -282,9 +294,27 @@ export function Cards() {
             <div className="px-4 py-3" style={{ borderBottom: '1px solid rgba(0,212,255,0.06)', fontSize: 13, fontWeight: 600, color: '#E8F0FE' }}>
               Recent Transactions
             </div>
-            <div className="px-4 py-6 text-center" style={{ color: '#5A7A9C', fontSize: 13 }}>
-              No transactions yet.
-            </div>
+            {cardTxs.length === 0 ? (
+              <div className="px-4 py-6 text-center" style={{ color: '#5A7A9C', fontSize: 13 }}>
+                No transactions yet.
+              </div>
+            ) : (
+              cardTxs.map((tx, i) => (
+                <div
+                  key={tx.id}
+                  className="flex items-center justify-between px-4 py-2.5"
+                  style={{ borderBottom: i < cardTxs.length - 1 ? '1px solid rgba(0,212,255,0.04)' : 'none' }}
+                >
+                  <div style={{ fontSize: 13, color: '#E8F0FE' }}>{CARD_TX_LABELS[tx.type] ?? tx.type}</div>
+                  <div className="text-right">
+                    <div style={{ fontFamily: 'var(--font-mono)', fontSize: 13, fontWeight: 600, color: tx.type === 'card_spend' || tx.type === 'card_fee' ? '#FF3B5C' : '#00C896' }}>
+                      {tx.type === 'card_spend' || tx.type === 'card_fee' ? '-' : '+'}${Math.abs(tx.usdValue).toLocaleString('en', { minimumFractionDigits: 2 })}
+                    </div>
+                    <div style={{ fontSize: 11, color: '#5A7A9C' }}>{new Date(tx.createdAt).toLocaleString('en', { dateStyle: 'short', timeStyle: 'short' })}</div>
+                  </div>
+                </div>
+              ))
+            )}
           </div>
         </div>
       </div>

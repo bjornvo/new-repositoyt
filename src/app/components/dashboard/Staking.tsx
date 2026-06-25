@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Layers, TrendingUp, Gift } from 'lucide-react';
 import { useLang } from '../../i18n/LangContext';
 import { BarChart, Bar, ResponsiveContainer, Tooltip, XAxis } from 'recharts';
@@ -6,11 +6,6 @@ import { useAuth } from '../../context/AuthContext';
 import { getStakes, stakeAsset, unstakeAsset, STAKING_POOLS, type Stake } from '../../../services/staking';
 import { getMarketPrices, type MarketPrice } from '../../../services/market';
 import { CryptoIcon } from '../common/CryptoIcon';
-
-const rewardsChart = [
-  { month: 'Jan', earn: 120 }, { month: 'Feb', earn: 145 }, { month: 'Mar', earn: 189 },
-  { month: 'Apr', earn: 210 }, { month: 'May', earn: 195 }, { month: 'Jun', earn: 248 },
-];
 
 export function Staking() {
   const { t } = useLang();
@@ -67,6 +62,14 @@ export function Staking() {
   const totalStaked = activeStakes.reduce((s, st) => s + st.amount * priceFor(st.asset), 0);
   const totalEarned = activeStakes.reduce((s, st) => s + st.earned * priceFor(st.asset), 0);
   const avgApy = activeStakes.length ? activeStakes.reduce((s, st) => s + st.apy, 0) / activeStakes.length : 0;
+
+  const rewardsByAsset = useMemo(() => {
+    const totals = new Map<string, number>();
+    for (const s of activeStakes) {
+      totals.set(s.asset, (totals.get(s.asset) ?? 0) + s.earned * priceFor(s.asset));
+    }
+    return Array.from(totals, ([asset, earn]) => ({ asset, earn }));
+  }, [activeStakes, prices]);
 
   if (loading) {
     return <div style={{ color: '#5A7A9C', fontSize: 13 }}>Loading stakes…</div>;
@@ -152,16 +155,20 @@ export function Staking() {
       {/* Rewards chart + available pools */}
       <div className="grid lg:grid-cols-5 gap-4">
         <div className="lg:col-span-2 p-4 rounded-2xl" style={{ background: '#0A1628', border: '1px solid rgba(0,212,255,0.1)' }}>
-          <div style={{ fontSize: 13, fontWeight: 600, color: '#E8F0FE', marginBottom: 12 }}>Monthly Rewards</div>
-          <div className="h-40">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={rewardsChart}>
-                <XAxis dataKey="month" tick={{ fontSize: 10, fill: '#5A7A9C' }} axisLine={false} tickLine={false} />
-                <Tooltip contentStyle={{ background: '#0D1E35', border: '1px solid rgba(0,212,255,0.2)', borderRadius: 8, fontSize: 11 }} formatter={(v: number) => [`$${v}`, 'Earned']} />
-                <Bar dataKey="earn" name="earnings" fill="#00D4FF" radius={[4, 4, 0, 0]} opacity={0.8} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
+          <div style={{ fontSize: 13, fontWeight: 600, color: '#E8F0FE', marginBottom: 12 }}>Rewards by Asset</div>
+          {rewardsByAsset.length === 0 ? (
+            <div className="h-40 flex items-center justify-center" style={{ color: '#5A7A9C', fontSize: 13 }}>No rewards earned yet.</div>
+          ) : (
+            <div className="h-40">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={rewardsByAsset}>
+                  <XAxis dataKey="asset" tick={{ fontSize: 10, fill: '#5A7A9C' }} axisLine={false} tickLine={false} />
+                  <Tooltip contentStyle={{ background: '#0D1E35', border: '1px solid rgba(0,212,255,0.2)', borderRadius: 8, fontSize: 11 }} formatter={(v: number) => [`$${v.toFixed(2)}`, 'Earned']} />
+                  <Bar dataKey="earn" name="earnings" fill="#00D4FF" radius={[4, 4, 0, 0]} opacity={0.8} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          )}
         </div>
 
         {/* Available pools */}

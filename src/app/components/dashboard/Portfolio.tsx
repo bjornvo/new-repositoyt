@@ -1,28 +1,20 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { TrendingUp, TrendingDown } from 'lucide-react';
 import { AreaChart, Area, PieChart, Pie, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { useLang } from '../../i18n/LangContext';
 import { useAuth } from '../../context/AuthContext';
 import { getPortfolio, type PortfolioSnapshot } from '../../../services/portfolio';
+import { getMarketPrices, type MarketPrice } from '../../../services/market';
 import { CryptoIcon } from '../common/CryptoIcon';
 
-const portfolioHistory = [
-  { date: 'Jan', v: 42000 }, { date: 'Feb', v: 38500 }, { date: 'Mar', v: 51000 },
-  { date: 'Apr', v: 47200 }, { date: 'May', v: 58400 }, { date: 'Jun', v: 54100 },
-  { date: 'Jul', v: 63800 }, { date: 'Aug', v: 61200 }, { date: 'Sep', v: 71500 },
-  { date: 'Oct', v: 68900 }, { date: 'Nov', v: 78300 }, { date: 'Dec', v: 74832 },
-];
+const COIN_COLORS: Record<string, string> = {
+  BTC: '#F7931A', ETH: '#627EEA', SOL: '#9945FF', MATIC: '#8247E5', USDC: '#2775CA',
+  BNB: '#F0B90B', USDT: '#26A17B', XRP: '#23292F', ADA: '#0033AD', AVAX: '#E84142',
+  DOT: '#E6007A', LINK: '#2A5ADA', UNI: '#FF007A', ATOM: '#2E3148',
+};
 
-const ASSETS = [
-  { coin: 'BTC', name: 'Bitcoin', amount: '0.8420', usd: 57124, change: 2.43, color: '#F7931A', alloc: 36 },
-  { coin: 'ETH', name: 'Ethereum', amount: '3.210', usd: 11302, change: 1.82, color: '#627EEA', alloc: 23 },
-  { coin: 'SOL', name: 'Solana', amount: '34.50', usd: 6294, change: 5.21, color: '#9945FF', alloc: 15 },
-  { coin: 'USDT', name: 'Tether USD', amount: '5000.00', usd: 5000, change: 0.01, color: '#26A17B', alloc: 12 },
-  { coin: 'BNB', name: 'BNB Chain', amount: '8.400', usd: 5143, change: -0.87, color: '#F0B90B', alloc: 8 },
-  { coin: 'Other', name: 'Other Assets', amount: '—', usd: 2969, change: 1.44, color: '#5A7A9C', alloc: 6 },
-];
-
-const RANGES = ['1D', '1W', '1M', '3M', '1Y', 'ALL'];
+const RANGE_DAYS: Record<string, number | null> = { '1D': 1, '1W': 7, '1M': 30, '3M': 90, '1Y': 365, ALL: null };
+const RANGES = Object.keys(RANGE_DAYS);
 
 type Range = typeof RANGES[number];
 
@@ -32,22 +24,47 @@ export function Portfolio() {
   const d = t.dashboard.portfolio;
   const [range, setRange] = useState<Range>('1Y');
   const [portfolio, setPortfolio] = useState<PortfolioSnapshot | null>(null);
+  const [prices, setPrices] = useState<MarketPrice[]>([]);
 
   useEffect(() => {
-    getPortfolio(user?.id ?? 'guest').then(setPortfolio);
+    Promise.all([getPortfolio(user?.id ?? 'guest'), getMarketPrices()]).then(([p, pr]) => {
+      setPortfolio(p);
+      setPrices(pr);
+    });
   }, [user?.id]);
 
-  // The asset list + chart below are a hardcoded showcase. Derive the header
-  // total from the same assets so the screen is always coherent (no $0 / no
-  // mismatch with the list). If real wallet data is present (totalUsd > 0),
-  // prefer it.
-  const assetsTotal = ASSETS.reduce((sum, a) => sum + a.usd, 0);
-  const hasRealData = !!(portfolio && portfolio.totalUsd > 0);
-  const totalBalance = hasRealData ? portfolio!.totalUsd : assetsTotal;
-  const changePct = portfolio?.change24hPct ?? 3.96;
+  const totalBalance = portfolio?.totalUsd ?? 0;
+  const changePct = portfolio?.change24hPct ?? 0;
   const change24h = totalBalance * (changePct / 100);
-  const totalPnl = totalBalance * 0.433;
-  const pnlPct = 76.28;
+
+  const history = portfolio?.history ?? [];
+  const chartData = useMemo(() => {
+    const days = RANGE_DAYS[range];
+    const sliced = days ? history.slice(-days) : history;
+    return sliced.map(h => ({ date: h.date, v: h.value }));
+  }, [history, range]);
+
+  const oldestValue = chartData[0]?.v ?? totalBalance;
+  const totalPnl = totalBalance - oldestValue;
+  const pnlPct = oldestValue > 0 ? (totalPnl / oldestValue) * 100 : 0;
+
+  const assets = useMemo(() => {
+    const wallets = portfolio?.wallets ?? [];
+    return wallets
+      .map(w => {
+        const price = prices.find(p => p.symbol === w.symbol);
+        return {
+          coin: w.symbol,
+          name: price?.name ?? w.chain,
+          amount: w.balance.toLocaleString('en', { maximumFractionDigits: 6 }),
+          usd: w.usdValue,
+          change: price?.change24h ?? 0,
+          color: COIN_COLORS[w.symbol] ?? price?.color ?? '#00D4FF',
+          alloc: totalBalance > 0 ? (w.usdValue / totalBalance) * 100 : 0,
+        };
+      })
+      .sort((a, b) => b.usd - a.usd);
+  }, [portfolio, prices, totalBalance]);
 
   return (
     <div className="space-y-5">
@@ -58,19 +75,19 @@ export function Portfolio() {
             label: d.totalBalance,
             value: `$${totalBalance.toLocaleString('en', { minimumFractionDigits: 2 })}`,
             sub: `${change24h >= 0 ? '+' : ''}$${change24h.toLocaleString('en', { minimumFractionDigits: 2 })} today`,
-            positive: true,
+            positive: change24h >= 0,
           },
           {
             label: d.change24h,
-            value: `+${changePct}%`,
+            value: `${changePct >= 0 ? '+' : ''}${changePct.toFixed(2)}%`,
             sub: `$${change24h.toLocaleString('en', { minimumFractionDigits: 2 })}`,
-            positive: true,
+            positive: changePct >= 0,
           },
           {
             label: d.pnl,
-            value: `+$${totalPnl.toLocaleString('en', { minimumFractionDigits: 2 })}`,
-            sub: `+${pnlPct}% all-time`,
-            positive: true,
+            value: `${totalPnl >= 0 ? '+' : ''}$${totalPnl.toLocaleString('en', { minimumFractionDigits: 2 })}`,
+            sub: `${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(2)}% all-time`,
+            positive: totalPnl >= 0,
           },
         ].map((card, i) => (
           <div key={i} className="p-5 rounded-2xl" style={{ background: '#0A1628', border: '1px solid rgba(0,212,255,0.1)' }}>
@@ -113,7 +130,7 @@ export function Portfolio() {
         </div>
         <div className="h-52">
           <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={portfolioHistory}>
+            <AreaChart data={chartData}>
               <defs>
                 <linearGradient id="portGrad" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="5%" stopColor="#00D4FF" stopOpacity={0.25} />
@@ -139,14 +156,17 @@ export function Portfolio() {
           <div className="px-5 py-4" style={{ borderBottom: '1px solid rgba(0,212,255,0.06)' }}>
             <div style={{ fontSize: 14, fontWeight: 600, color: '#E8F0FE' }}>{d.assets}</div>
           </div>
+          {assets.length === 0 && (
+            <div className="px-5 py-6 text-center" style={{ color: '#5A7A9C', fontSize: 13 }}>No assets yet.</div>
+          )}
           <div className="divide-y" style={{ '--tw-divide-opacity': 1 } as React.CSSProperties}>
-            {ASSETS.map((a) => (
+            {assets.map((a) => (
               <div key={a.coin} className="flex items-center justify-between px-5 py-3">
                 <div className="flex items-center gap-3">
                   <CryptoIcon symbol={a.coin} color={a.color} size={36} />
                   <div>
                     <div style={{ fontSize: 14, fontWeight: 600, color: '#E8F0FE' }}>{a.name}</div>
-                    <div style={{ fontSize: 11, color: '#5A7A9C', fontFamily: 'var(--font-mono)' }}>{a.amount !== '—' ? `${a.amount} ${a.coin}` : a.coin}</div>
+                    <div style={{ fontSize: 11, color: '#5A7A9C', fontFamily: 'var(--font-mono)' }}>{a.amount} {a.coin}</div>
                   </div>
                 </div>
                 <div className="flex items-center gap-6">
@@ -154,7 +174,7 @@ export function Portfolio() {
                     <div className="h-1 w-20 rounded-full" style={{ background: 'rgba(255,255,255,0.05)' }}>
                       <div className="h-full rounded-full" style={{ width: `${a.alloc}%`, background: a.color }} />
                     </div>
-                    <div style={{ fontSize: 10, color: '#5A7A9C', textAlign: 'right', marginTop: 2 }}>{a.alloc}%</div>
+                    <div style={{ fontSize: 10, color: '#5A7A9C', textAlign: 'right', marginTop: 2 }}>{a.alloc.toFixed(0)}%</div>
                   </div>
                   <div className="text-right">
                     <div style={{ fontSize: 14, fontWeight: 600, color: '#E8F0FE', fontFamily: 'var(--font-mono)' }}>
@@ -176,24 +196,24 @@ export function Portfolio() {
           <div className="h-44">
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
-                <Pie data={ASSETS} dataKey="alloc" nameKey="coin" innerRadius={50} outerRadius={75} paddingAngle={2} stroke="none">
-                  {ASSETS.map((a) => <Cell key={`cell-${a.coin}`} fill={a.color} />)}
+                <Pie data={assets} dataKey="alloc" nameKey="coin" innerRadius={50} outerRadius={75} paddingAngle={2} stroke="none">
+                  {assets.map((a) => <Cell key={`cell-${a.coin}`} fill={a.color} />)}
                 </Pie>
                 <Tooltip
                   contentStyle={{ background: '#0D1E35', border: '1px solid rgba(0,212,255,0.2)', borderRadius: 8, fontSize: 12 }}
-                  formatter={(v: number, name: string) => [`${v}%`, name]}
+                  formatter={(v: number, name: string) => [`${v.toFixed(1)}%`, name]}
                 />
               </PieChart>
             </ResponsiveContainer>
           </div>
           <div className="space-y-1.5 mt-2">
-            {ASSETS.map((a) => (
+            {assets.map((a) => (
               <div key={a.coin} className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <div className="w-2.5 h-2.5 rounded-full" style={{ background: a.color }} />
                   <span style={{ fontSize: 12, color: '#8AA8C4' }}>{a.coin}</span>
                 </div>
-                <span style={{ fontSize: 12, fontFamily: 'var(--font-mono)', color: '#5A7A9C' }}>{a.alloc}%</span>
+                <span style={{ fontSize: 12, fontFamily: 'var(--font-mono)', color: '#5A7A9C' }}>{a.alloc.toFixed(0)}%</span>
               </div>
             ))}
           </div>
